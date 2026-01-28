@@ -1,0 +1,61 @@
+[project]
+name = "ship"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiofiles>=24.1.0",
+    "beautifulsoup4>=4.14.0",
+    "fastapi[standard]>=0.117.1",
+    "imageio>=2.37.0",
+    "ipykernel>=6.30.1",
+    "ipython>=9.5.0",
+    "jinja2>=3.1.6",
+    "jupyter-client>=8.6.3",
+    "lxml>=6.0.2",
+    "matplotlib>=3.7.0",
+    "numpy>=2.3.3",
+    "opencv-python-headless>=4.11.0.86",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.2",
+    "pdfplumber>=0.11.9",
+    "pillow>=11.3.0",
+    "pydantic>=2.11.9",
+    "pypdf>=6.6.0",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
+    "reportlab>=4.4.7",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
+    "tomli>=2.0.0",
+    "uvicorn>=0.37.0",
+    "xlrd>=2.0.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "docker>=7.0.0",
+    "requests>=2.31.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-config",
+    "--strict-markers",
+]
+markers = [
+    "integration: marks tests as integration tests (may be slow)",
+    "unit: marks tests as unit tests (fast)",
+    "slow: marks tests as slow tests (require more time)",
+]
+asyncio_mode = "auto"
