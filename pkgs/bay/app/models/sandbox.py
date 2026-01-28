@@ -40,7 +40,12 @@ class Sandbox(SQLModel, table=True):
     profile_id: str = Field(default="python-default")
 
     # Workspace relationship
-    workspace_id: str = Field(foreign_key="workspaces.id", index=True)
+    # Note: workspace_id can become NULL after sandbox is soft-deleted and
+    # its managed workspace is cascade-deleted. For active sandboxes (deleted_at IS NULL),
+    # workspace_id is guaranteed to be set at creation time.
+    workspace_id: Optional[str] = Field(
+        default=None, foreign_key="workspaces.id", index=True
+    )
 
     # Current session (single session for Phase 1)
     current_session_id: Optional[str] = Field(default=None, index=True)
