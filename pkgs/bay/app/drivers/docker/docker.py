@@ -266,7 +266,8 @@ class DockerDriver(Driver):
             "Labels": volume_labels,
         })
 
-        return volume["Name"]
+        # aiodocker returns DockerVolume object, get name from it
+        return volume.name
 
     async def delete_volume(self, name: str) -> None:
         """Delete a Docker volume."""

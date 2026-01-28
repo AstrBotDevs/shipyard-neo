@@ -6,11 +6,9 @@ Sandbox is the only external-facing resource.
 - Session can be recycled/recreated transparently
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -45,14 +43,14 @@ class Sandbox(SQLModel, table=True):
     workspace_id: str = Field(foreign_key="workspaces.id", index=True)
 
     # Current session (single session for Phase 1)
-    current_session_id: str | None = Field(default=None, index=True)
+    current_session_id: Optional[str] = Field(default=None, index=True)
 
     # TTL management
-    expires_at: datetime | None = Field(default=None)  # null = no expiry
-    idle_expires_at: datetime | None = Field(default=None)
+    expires_at: Optional[datetime] = Field(default=None)  # null = no expiry
+    idle_expires_at: Optional[datetime] = Field(default=None)
 
     # Soft delete (tombstone)
-    deleted_at: datetime | None = Field(default=None, index=True)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
 
     # Optimistic locking
     version: int = Field(default=1)
@@ -77,7 +75,7 @@ class Sandbox(SQLModel, table=True):
             return False
         return datetime.utcnow() > self.expires_at
 
-    def compute_status(self, current_session: "Session | None" = None) -> SandboxStatus:
+    def compute_status(self, current_session: "Optional[Session]" = None) -> SandboxStatus:
         """Compute aggregated status for external API.
         
         Args:

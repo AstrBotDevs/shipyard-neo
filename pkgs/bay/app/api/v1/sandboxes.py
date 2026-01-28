@@ -8,9 +8,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Header, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.errors import NotFoundError
+from app.api.dependencies import OwnerDep, SandboxManagerDep
+from app.config import get_settings
+from app.models.sandbox import SandboxStatus
 
 router = APIRouter()
 
@@ -46,12 +48,32 @@ class SandboxListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+def _sandbox_to_response(sandbox, current_session=None) -> SandboxResponse:
+    """Convert Sandbox model to API response."""
+    settings = get_settings()
+    profile = settings.get_profile(sandbox.profile_id)
+    capabilities = profile.capabilities if profile else []
+
+    return SandboxResponse(
+        id=sandbox.id,
+        status=sandbox.compute_status(current_session).value,
+        profile=sandbox.profile_id,
+        workspace_id=sandbox.workspace_id,
+        capabilities=capabilities,
+        created_at=sandbox.created_at,
+        expires_at=sandbox.expires_at,
+        idle_expires_at=sandbox.idle_expires_at,
+    )
+
+
 # Endpoints
 
 
 @router.post("", response_model=SandboxResponse, status_code=201)
 async def create_sandbox(
     request: CreateSandboxRequest,
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> SandboxResponse:
     """Create a new sandbox.
@@ -59,56 +81,99 @@ async def create_sandbox(
     - Lazy session creation: status may be 'idle' initially
     - ttl=null or ttl=0 means no expiry
     """
-    # TODO: Implement with SandboxManager
-    # For now, return a placeholder
-    raise NotImplementedError("Sandbox creation not yet implemented")
+    # TODO: Handle idempotency key
+    
+    sandbox = await sandbox_mgr.create(
+        owner=owner,
+        profile_id=request.profile,
+        workspace_id=request.workspace_id,
+        ttl=request.ttl,
+    )
+
+    return _sandbox_to_response(sandbox)
 
 
 @router.get("", response_model=SandboxListResponse)
 async def list_sandboxes(
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None),
     status: str | None = Query(None),
 ) -> SandboxListResponse:
     """List sandboxes for the current user."""
-    # TODO: Implement with SandboxManager
-    return SandboxListResponse(items=[], next_cursor=None)
+    # Convert string status to enum if provided
+    status_filter = None
+    if status:
+        try:
+            status_filter = SandboxStatus(status)
+        except ValueError:
+            pass  # Invalid status, ignore filter
+
+    sandboxes, next_cursor = await sandbox_mgr.list(
+        owner=owner,
+        status=status_filter,
+        limit=limit,
+        cursor=cursor,
+    )
+
+    items = [_sandbox_to_response(s) for s in sandboxes]
+    return SandboxListResponse(items=items, next_cursor=next_cursor)
 
 
 @router.get("/{sandbox_id}", response_model=SandboxResponse)
-async def get_sandbox(sandbox_id: str) -> SandboxResponse:
+async def get_sandbox(
+    sandbox_id: str,
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
+) -> SandboxResponse:
     """Get sandbox details."""
-    # TODO: Implement with SandboxManager
-    raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+    sandbox = await sandbox_mgr.get(sandbox_id, owner)
+    current_session = await sandbox_mgr.get_current_session(sandbox)
+    return _sandbox_to_response(sandbox, current_session)
 
 
 @router.post("/{sandbox_id}/keepalive", status_code=200)
-async def keepalive(sandbox_id: str) -> dict[str, str]:
+async def keepalive(
+    sandbox_id: str,
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
+) -> dict[str, str]:
     """Keep sandbox alive - extends idle timeout only, not TTL.
     
     Does not implicitly start compute if no session exists.
     """
-    # TODO: Implement with SandboxManager
-    raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+    sandbox = await sandbox_mgr.get(sandbox_id, owner)
+    await sandbox_mgr.keepalive(sandbox)
+    return {"status": "ok"}
 
 
 @router.post("/{sandbox_id}/stop", status_code=200)
-async def stop_sandbox(sandbox_id: str) -> dict[str, str]:
+async def stop_sandbox(
+    sandbox_id: str,
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
+) -> dict[str, str]:
     """Stop sandbox - reclaims compute, keeps workspace.
     
     Idempotent: repeated calls maintain final state consistency.
     """
-    # TODO: Implement with SandboxManager
-    raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+    sandbox = await sandbox_mgr.get(sandbox_id, owner)
+    await sandbox_mgr.stop(sandbox)
+    return {"status": "stopped"}
 
 
 @router.delete("/{sandbox_id}", status_code=204)
-async def delete_sandbox(sandbox_id: str) -> None:
+async def delete_sandbox(
+    sandbox_id: str,
+    sandbox_mgr: SandboxManagerDep,
+    owner: OwnerDep,
+) -> None:
     """Delete sandbox permanently.
     
     - Destroys all running sessions
     - Cascade deletes managed workspace
     - Does NOT cascade delete external workspace
     """
-    # TODO: Implement with SandboxManager
-    raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+    sandbox = await sandbox_mgr.get(sandbox_id, owner)
+    await sandbox_mgr.delete(sandbox)

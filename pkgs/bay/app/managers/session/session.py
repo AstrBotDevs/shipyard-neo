@@ -86,10 +86,8 @@ class SessionManager:
 
     async def get(self, session_id: str) -> Session | None:
         """Get session by ID."""
-        result = await self._db.exec(
-            select(Session).where(Session.id == session_id)
-        )
-        return result.first()
+        result = await self._db.execute(select(Session).where(Session.id == session_id))
+        return result.scalars().first()
 
     async def ensure_running(
         self,
@@ -237,10 +235,8 @@ class SessionManager:
 
     async def touch(self, session_id: str) -> None:
         """Update last_active_at timestamp."""
-        result = await self._db.exec(
-            select(Session).where(Session.id == session_id)
-        )
-        session = result.first()
+        result = await self._db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalars().first()
 
         if session:
             session.last_active_at = datetime.utcnow()

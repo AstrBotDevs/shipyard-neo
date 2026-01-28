@@ -11,6 +11,10 @@ from sqlmodel import SQLModel
 
 from app.config import get_settings
 
+# Import all models to ensure they are registered with SQLModel metadata
+# This is required for relationship resolution at runtime
+import app.models  # noqa: F401
+
 # Lazy initialization - engine created on first use
 _engine = None
 _async_session_factory = None

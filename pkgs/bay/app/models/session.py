@@ -6,11 +6,9 @@ Session represents a running container instance.
 - Not exposed to external API (only sandbox_id is exposed)
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -42,13 +40,13 @@ class Session(SQLModel, table=True):
     profile_id: str = Field(default="python-default")
 
     # Container info
-    container_id: str | None = Field(default=None)
-    endpoint: str | None = Field(default=None)  # Ship REST API endpoint
+    container_id: Optional[str] = Field(default=None)
+    endpoint: Optional[str] = Field(default=None)  # Ship REST API endpoint
 
     # State management (desired vs observed)
     desired_state: SessionStatus = Field(default=SessionStatus.PENDING)
     observed_state: SessionStatus = Field(default=SessionStatus.PENDING)
-    last_observed_at: datetime | None = Field(default=None)
+    last_observed_at: Optional[datetime] = Field(default=None)
 
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)

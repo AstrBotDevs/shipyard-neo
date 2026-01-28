@@ -126,14 +126,14 @@ class SandboxManager:
         Raises:
             NotFoundError: If sandbox not found or deleted
         """
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Sandbox).where(
                 Sandbox.id == sandbox_id,
                 Sandbox.owner == owner,
                 Sandbox.deleted_at.is_(None),  # Not soft-deleted
             )
         )
-        sandbox = result.first()
+        sandbox = result.scalars().first()
 
         if sandbox is None:
             raise NotFoundError(f"Sandbox not found: {sandbox_id}")
@@ -169,8 +169,8 @@ class SandboxManager:
 
         query = query.order_by(Sandbox.id).limit(limit + 1)
 
-        result = await self._db.exec(query)
-        sandboxes = list(result.all())
+        result = await self._db.execute(query)
+        sandboxes = list(result.scalars().all())
 
         next_cursor = None
         if len(sandboxes) > limit:
@@ -266,10 +266,10 @@ class SandboxManager:
         self._log.info("sandbox.stop", sandbox_id=sandbox.id)
 
         # Stop all sessions for this sandbox
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Session).where(Session.sandbox_id == sandbox.id)
         )
-        sessions = result.all()
+        sessions = result.scalars().all()
 
         for session in sessions:
             await self._session_mgr.stop(session)
@@ -292,10 +292,10 @@ class SandboxManager:
         self._log.info("sandbox.delete", sandbox_id=sandbox.id)
 
         # Destroy all sessions
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Session).where(Session.sandbox_id == sandbox.id)
         )
-        sessions = result.all()
+        sessions = result.scalars().all()
 
         for session in sessions:
             await self._session_mgr.destroy(session)

@@ -100,13 +100,13 @@ class WorkspaceManager:
         Raises:
             NotFoundError: If workspace not found or not visible
         """
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Workspace).where(
                 Workspace.id == workspace_id,
                 Workspace.owner == owner,
             )
         )
-        workspace = result.first()
+        workspace = result.scalars().first()
 
         if workspace is None:
             raise NotFoundError(f"Workspace not found: {workspace_id}")
@@ -115,10 +115,10 @@ class WorkspaceManager:
 
     async def get_by_id(self, workspace_id: str) -> Workspace | None:
         """Get workspace by ID (internal use, no owner check)."""
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Workspace).where(Workspace.id == workspace_id)
         )
-        return result.first()
+        return result.scalars().first()
 
     async def list(
         self,
@@ -145,8 +145,8 @@ class WorkspaceManager:
 
         query = query.order_by(Workspace.id).limit(limit + 1)
 
-        result = await self._db.exec(query)
-        workspaces = list(result.all())
+        result = await self._db.execute(query)
+        workspaces = list(result.scalars().all())
 
         next_cursor = None
         if len(workspaces) > limit:
@@ -200,10 +200,10 @@ class WorkspaceManager:
 
     async def touch(self, workspace_id: str) -> None:
         """Update last_accessed_at timestamp."""
-        result = await self._db.exec(
+        result = await self._db.execute(
             select(Workspace).where(Workspace.id == workspace_id)
         )
-        workspace = result.first()
+        workspace = result.scalars().first()
 
         if workspace:
             workspace.last_accessed_at = datetime.utcnow()

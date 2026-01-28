@@ -7,10 +7,8 @@ Types:
 - external: Created explicitly by POST /workspaces, never cascade-deleted
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -32,7 +30,7 @@ class Workspace(SQLModel, table=True):
 
     # Managed workspace relationship
     managed: bool = Field(default=True)
-    managed_by_sandbox_id: str | None = Field(default=None, index=True)
+    managed_by_sandbox_id: Optional[str] = Field(default=None, index=True)
 
     # Quota
     size_limit_mb: int = Field(default=1024)
