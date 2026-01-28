@@ -1,0 +1,80 @@
+# Bay Configuration
+# This file can be placed at:
+# - ./config.yaml (development)
+# - /etc/bay/config.yaml (production)
+# - Or set BAY_CONFIG_FILE environment variable
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+database:
+  # Phase 1: SQLite (single instance)
+  # For production: postgresql+asyncpg://user:pass@host/dbname
+  url: "sqlite+aiosqlite:///./bay.db"
+  echo: false
+
+driver:
+  type: docker  # docker | k8s
+  docker:
+    socket: "unix:///var/run/docker.sock"
+    network: "bay-network"
+  # k8s:  # Phase 2
+  #   namespace: "bay"
+  #   kubeconfig: null
+
+workspace:
+  root_path: "/var/lib/bay/workspaces"
+  default_size_limit_mb: 1024
+  mount_path: "/workspace"  # Fixed, do not change
+
+security:
+  jwt_secret: "${JWT_SECRET:dev-secret-change-in-production}"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+  blocked_hosts:
+    - "169.254.0.0/16"  # Cloud metadata
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+# Runtime profiles
+# These define the available sandbox configurations
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    resources:
+      cpus: 1.0
+      memory: "1g"
+    capabilities:
+      - filesystem
+      - shell
+      - ipython
+    idle_timeout: 1800  # 30 minutes
+    env: {}
+
+  - id: python-data
+    image: "ship:data"
+    resources:
+      cpus: 2.0
+      memory: "4g"
+    capabilities:
+      - filesystem
+      - shell
+      - ipython
+    idle_timeout: 1800
+    env: {}
+
+  # Example: GPU profile (Phase 2+)
+  # - id: python-gpu
+  #   image: "ship:gpu"
+  #   resources:
+  #     cpus: 4.0
+  #     memory: "16g"
+  #   capabilities:
+  #     - filesystem
+  #     - shell
+  #     - ipython
+  #   idle_timeout: 3600
+  #   env:
+  #     CUDA_VISIBLE_DEVICES: "0"

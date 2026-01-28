@@ -1,0 +1,103 @@
+"""Sandbox data model.
+
+Sandbox is the only external-facing resource.
+- Stable ID that clients hold onto
+- Aggregates Workspace + Profile + Session(s)
+- Session can be recycled/recreated transparently
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from app.models.session import Session
+    from app.models.workspace import Workspace
+
+
+class SandboxStatus(str, Enum):
+    """Aggregated sandbox status (for external API)."""
+
+    IDLE = "idle"  # No running session
+    STARTING = "starting"  # Session is starting
+    READY = "ready"  # Session is running and ready
+    FAILED = "failed"  # Last session start failed
+    EXPIRED = "expired"  # TTL expired
+    DELETED = "deleted"  # Soft-deleted (internal only)
+
+
+class Sandbox(SQLModel, table=True):
+    """Sandbox - external-facing resource."""
+
+    __tablename__ = "sandboxes"
+
+    id: str = Field(primary_key=True)
+    owner: str = Field(index=True)
+
+    # Profile (runtime specification)
+    profile_id: str = Field(default="python-default")
+
+    # Workspace relationship
+    workspace_id: str = Field(foreign_key="workspaces.id", index=True)
+
+    # Current session (single session for Phase 1)
+    current_session_id: str | None = Field(default=None, index=True)
+
+    # TTL management
+    expires_at: datetime | None = Field(default=None)  # null = no expiry
+    idle_expires_at: datetime | None = Field(default=None)
+
+    # Soft delete (tombstone)
+    deleted_at: datetime | None = Field(default=None, index=True)
+
+    # Optimistic locking
+    version: int = Field(default=1)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_active_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    workspace: "Workspace" = Relationship(back_populates="sandboxes")
+    sessions: list["Session"] = Relationship(back_populates="sandbox")
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if sandbox is soft-deleted."""
+        return self.deleted_at is not None
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if sandbox TTL has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.utcnow() > self.expires_at
+
+    def compute_status(self, current_session: "Session | None" = None) -> SandboxStatus:
+        """Compute aggregated status for external API.
+        
+        Args:
+            current_session: The current session object (if loaded)
+        """
+        from app.models.session import SessionStatus
+
+        if self.deleted_at is not None:
+            return SandboxStatus.DELETED
+        if self.is_expired:
+            return SandboxStatus.EXPIRED
+
+        if current_session is None:
+            return SandboxStatus.IDLE
+
+        if current_session.observed_state == SessionStatus.RUNNING:
+            return SandboxStatus.READY
+        if current_session.observed_state in (SessionStatus.PENDING, SessionStatus.STARTING):
+            return SandboxStatus.STARTING
+        if current_session.observed_state == SessionStatus.FAILED:
+            return SandboxStatus.FAILED
+
+        return SandboxStatus.IDLE

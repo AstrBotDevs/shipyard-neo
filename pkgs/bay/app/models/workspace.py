@@ -1,0 +1,51 @@
+"""Workspace data model.
+
+Workspace represents a persistent data volume that can be shared across Sessions.
+
+Types:
+- managed: Created implicitly by POST /sandboxes, cascade-deleted with Sandbox
+- external: Created explicitly by POST /workspaces, never cascade-deleted
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from app.models.sandbox import Sandbox
+
+
+class Workspace(SQLModel, table=True):
+    """Workspace - persistent data storage."""
+
+    __tablename__ = "workspaces"
+
+    id: str = Field(primary_key=True)
+    owner: str = Field(index=True)
+
+    # Storage backend
+    backend: str = Field(default="docker_volume")  # docker_volume | k8s_pvc
+    driver_ref: str = Field(default="")  # Volume name or PVC name
+
+    # Managed workspace relationship
+    managed: bool = Field(default=True)
+    managed_by_sandbox_id: str | None = Field(default=None, index=True)
+
+    # Quota
+    size_limit_mb: int = Field(default=1024)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_accessed_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    sandboxes: list["Sandbox"] = Relationship(back_populates="workspace")
+
+    # Fixed mount path (not stored, constant)
+    @property
+    def mount_path(self) -> str:
+        """Container mount path - always /workspace."""
+        return "/workspace"
