@@ -30,7 +30,17 @@ class PythonExecRequest(BaseModel):
 
 
 class PythonExecResponse(BaseModel):
-    """Python execution response."""
+    """Python execution response.
+    
+    `data` contains rich output from IPython kernel:
+    {
+        "execution_count": int | None,
+        "output": {
+            "text": str,
+            "images": list[dict[str, str]]  # [{"image/png": "base64..."}]
+        }
+    }
+    """
 
     success: bool
     output: str

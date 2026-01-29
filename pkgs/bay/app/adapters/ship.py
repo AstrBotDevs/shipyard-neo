@@ -165,6 +165,8 @@ class ShipAdapter(BaseAdapter):
             error=result.get("error"),
             data={
                 "execution_count": result.get("execution_count"),
+                # Full output object including images:
+                # { "text": "...", "images": [{"image/png": "base64..."}] }
                 "output": output_obj,
             },
         )

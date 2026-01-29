@@ -27,7 +27,17 @@ class RuntimeMeta:
 
 @dataclass
 class ExecutionResult:
-    """Result of code/command execution."""
+    """Result of code/command execution.
+    
+    For Python execution (IPython), `data` contains:
+    {
+        "execution_count": int | None,
+        "output": {
+            "text": str,
+            "images": list[dict[str, str]]  # [{"image/png": "base64..."}]
+        }
+    }
+    """
 
     success: bool
     output: str
