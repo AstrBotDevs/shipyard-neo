@@ -82,22 +82,6 @@ check_prerequisites() {
     fi
     log_info "✓ docker-compose is available"
     
-    # Check ship:latest image
-    if ! docker image inspect ship:latest >/dev/null 2>&1; then
-        log_error "ship:latest image not found"
-        log_error "Please build it with: cd pkgs/ship && make build"
-        exit 1
-    fi
-    log_info "✓ ship:latest image found"
-    
-    # Check bay:latest image (or build it)
-    if ! docker image inspect bay:latest >/dev/null 2>&1; then
-        log_warn "bay:latest image not found, building..."
-        cd "$BAY_DIR"
-        docker build -t bay:latest .
-    fi
-    log_info "✓ bay:latest image found"
-    
     # Check compose file
     if [ ! -f "$COMPOSE_FILE" ]; then
         log_error "docker-compose.yaml not found: $COMPOSE_FILE"
@@ -113,6 +97,29 @@ check_prerequisites() {
         fi
     fi
     log_info "✓ Port $BAY_PORT is available"
+}
+
+build_images() {
+    log_info "Building ship:latest image..."
+    
+    SHIP_DIR="$(cd "${BAY_DIR}/../ship" && pwd)"
+    
+    if [ ! -d "$SHIP_DIR" ]; then
+        log_error "Ship directory not found: $SHIP_DIR"
+        exit 1
+    fi
+    
+    cd "$SHIP_DIR"
+    docker build -t ship:latest .
+    
+    log_info "✓ ship:latest image built"
+    
+    log_info "Building bay:latest image..."
+    
+    cd "$BAY_DIR"
+    docker build -t bay:latest .
+    
+    log_info "✓ bay:latest image built"
 }
 
 start_bay_container() {
@@ -173,6 +180,7 @@ done
 
 # Main execution
 check_prerequisites
+build_images
 start_bay_container
 
 # Set environment variable for tests to know which port to use

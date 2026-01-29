@@ -6,9 +6,7 @@ See: plans/phase-1/capability-adapter-design.md
 NOTE: Ship endpoint mappings:
 - python capability -> /ipython/exec (Ship uses IPython internally)
 - shell capability -> /shell/exec
-- filesystem capability -> /fs/*
-- upload capability -> /upload
-- download capability -> /download
+- filesystem capability -> /fs/* (includes upload/download)
 """
 
 from __future__ import annotations
@@ -27,15 +25,13 @@ logger = structlog.get_logger()
 class ShipAdapter(BaseAdapter):
     """HTTP adapter for Ship runtime.
     
-    Supported capabilities: python, shell, filesystem, upload, download, terminal
+    Supported capabilities: python, shell, filesystem (includes upload/download), terminal
     """
 
     SUPPORTED_CAPABILITIES = [
         "python",
         "shell",
         "filesystem",
-        "upload",
-        "download",
         "terminal",
     ]
 
@@ -222,7 +218,7 @@ class ShipAdapter(BaseAdapter):
         """Delete file or directory."""
         await self._post("/fs/delete_file", {"path": path})
 
-    # -- Upload/Download capability --
+    # -- Upload/Download (part of filesystem capability) --
 
     async def upload_file(self, path: str, content: bytes) -> None:
         """Upload binary file."""
@@ -231,7 +227,7 @@ class ShipAdapter(BaseAdapter):
                 files = {"file": ("file", content, "application/octet-stream")}
                 data = {"file_path": path}
                 response = await client.post(
-                    f"{self._base_url}/upload",
+                    f"{self._base_url}/fs/upload",
                     files=files,
                     data=data,
                     timeout=self._timeout,
@@ -246,7 +242,7 @@ class ShipAdapter(BaseAdapter):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self._base_url}/download",
+                    f"{self._base_url}/fs/download",
                     params={"file_path": path},
                     timeout=self._timeout,
                 )

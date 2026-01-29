@@ -152,23 +152,23 @@ async def exec_shell(
     )
 
 
-@router.post("/{sandbox_id}/files/read", response_model=FileReadResponse)
+@router.get("/{sandbox_id}/filesystem/files", response_model=FileReadResponse)
 async def read_file(
     sandbox_id: str,
-    request: FileReadRequest,
     sandbox_mgr: SandboxManagerDep,
     owner: OwnerDep,
+    path: str = Query(..., description="File path relative to /workspace"),
 ) -> FileReadResponse:
     """Read file from sandbox."""
     sandbox = await sandbox_mgr.get(sandbox_id, owner)
     capability_router = CapabilityRouter(sandbox_mgr)
 
-    content = await capability_router.read_file(sandbox=sandbox, path=request.path)
+    content = await capability_router.read_file(sandbox=sandbox, path=path)
 
     return FileReadResponse(content=content)
 
 
-@router.post("/{sandbox_id}/files/write", status_code=200)
+@router.put("/{sandbox_id}/filesystem/files", status_code=200)
 async def write_file(
     sandbox_id: str,
     request: FileWriteRequest,
@@ -188,39 +188,39 @@ async def write_file(
     return {"status": "ok"}
 
 
-@router.post("/{sandbox_id}/files/list", response_model=FileListResponse)
+@router.get("/{sandbox_id}/filesystem/directories", response_model=FileListResponse)
 async def list_files(
     sandbox_id: str,
-    request: FileListRequest,
     sandbox_mgr: SandboxManagerDep,
     owner: OwnerDep,
+    path: str = Query(".", description="Directory path relative to /workspace"),
 ) -> FileListResponse:
     """List directory contents in sandbox."""
     sandbox = await sandbox_mgr.get(sandbox_id, owner)
     capability_router = CapabilityRouter(sandbox_mgr)
 
-    entries = await capability_router.list_files(sandbox=sandbox, path=request.path)
+    entries = await capability_router.list_files(sandbox=sandbox, path=path)
 
     return FileListResponse(entries=entries)
 
 
-@router.post("/{sandbox_id}/files/delete", status_code=200)
+@router.delete("/{sandbox_id}/filesystem/files", status_code=200)
 async def delete_file(
     sandbox_id: str,
-    request: FileDeleteRequest,
     sandbox_mgr: SandboxManagerDep,
     owner: OwnerDep,
+    path: str = Query(..., description="File/directory path relative to /workspace"),
 ) -> dict[str, str]:
     """Delete file or directory from sandbox."""
     sandbox = await sandbox_mgr.get(sandbox_id, owner)
     capability_router = CapabilityRouter(sandbox_mgr)
 
-    await capability_router.delete_file(sandbox=sandbox, path=request.path)
+    await capability_router.delete_file(sandbox=sandbox, path=path)
 
     return {"status": "ok"}
 
 
-# -- Upload/Download endpoints --
+# -- Upload/Download endpoints (part of filesystem capability) --
 
 
 class FileUploadResponse(BaseModel):
@@ -231,7 +231,7 @@ class FileUploadResponse(BaseModel):
     size: int
 
 
-@router.post("/{sandbox_id}/files/upload", response_model=FileUploadResponse)
+@router.post("/{sandbox_id}/filesystem/upload", response_model=FileUploadResponse)
 async def upload_file(
     sandbox_id: str,
     sandbox_mgr: SandboxManagerDep,
@@ -254,7 +254,7 @@ async def upload_file(
     return FileUploadResponse(status="ok", path=path, size=len(content))
 
 
-@router.get("/{sandbox_id}/files/download")
+@router.get("/{sandbox_id}/filesystem/download")
 async def download_file(
     sandbox_id: str,
     sandbox_mgr: SandboxManagerDep,

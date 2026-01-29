@@ -66,7 +66,7 @@ profiles:
       cpus: 1.0
       memory: "1g"
     capabilities:
-      - filesystem
+      - filesystem  # includes upload/download
       - shell
       - python
     idle_timeout: 1800  # 30 minutes
@@ -79,7 +79,7 @@ profiles:
       cpus: 2.0
       memory: "4g"
     capabilities:
-      - filesystem
+      - filesystem  # includes upload/download
       - shell
       - python
     idle_timeout: 1800

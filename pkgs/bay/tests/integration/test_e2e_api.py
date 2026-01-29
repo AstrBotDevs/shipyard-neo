@@ -421,7 +421,7 @@ class TestE2E04ConcurrentEnsureRunning:
 
 
 class TestE2E05FileUploadDownload:
-    """E2E-05: File upload and download.
+    """E2E-05: File upload and download (part of filesystem capability).
     
     Purpose: Verify binary file upload/download to/from sandbox.
     """
@@ -443,7 +443,7 @@ class TestE2E05FileUploadDownload:
                 file_path = "test_upload.txt"
                 
                 upload_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/upload",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/upload",
                     files={"file": ("test_upload.txt", file_content, "text/plain")},
                     data={"path": file_path},
                     timeout=120.0,
@@ -457,7 +457,7 @@ class TestE2E05FileUploadDownload:
                 
                 # Download the file
                 download_response = await client.get(
-                    f"/v1/sandboxes/{sandbox_id}/files/download",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/download",
                     params={"path": file_path},
                     timeout=30.0,
                 )
@@ -485,7 +485,7 @@ class TestE2E05FileUploadDownload:
                 file_path = "test_binary.bin"
                 
                 upload_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/upload",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/upload",
                     files={"file": ("test_binary.bin", binary_content, "application/octet-stream")},
                     data={"path": file_path},
                     timeout=120.0,
@@ -495,7 +495,7 @@ class TestE2E05FileUploadDownload:
                 
                 # Download and verify
                 download_response = await client.get(
-                    f"/v1/sandboxes/{sandbox_id}/files/download",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/download",
                     params={"path": file_path},
                     timeout=30.0,
                 )
@@ -523,7 +523,7 @@ class TestE2E05FileUploadDownload:
                 file_path = "subdir/nested/test_file.txt"
                 
                 upload_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/upload",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/upload",
                     files={"file": ("test_file.txt", file_content, "text/plain")},
                     data={"path": file_path},
                     timeout=120.0,
@@ -533,7 +533,7 @@ class TestE2E05FileUploadDownload:
                 
                 # Download and verify
                 download_response = await client.get(
-                    f"/v1/sandboxes/{sandbox_id}/files/download",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/download",
                     params={"path": file_path},
                     timeout=30.0,
                 )
@@ -558,7 +558,7 @@ class TestE2E05FileUploadDownload:
             try:
                 # Try to download non-existent file
                 download_response = await client.get(
-                    f"/v1/sandboxes/{sandbox_id}/files/download",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/download",
                     params={"path": "nonexistent_file.txt"},
                     timeout=120.0,  # First download triggers session creation
                 )
@@ -579,7 +579,7 @@ class TestE2E05FileUploadDownload:
 class TestE2E06Filesystem:
     """E2E-06: Filesystem operations (read/write/list/delete).
     
-    Purpose: Verify text file read/write/list/delete via API.
+    Purpose: Verify text file read/write/list/delete via RESTful API.
     """
 
     async def test_write_and_read_file(self):
@@ -594,22 +594,22 @@ class TestE2E06Filesystem:
             sandbox_id = create_response.json()["id"]
             
             try:
-                # Write a file
+                # Write a file (PUT /filesystem/files)
                 file_content = "Hello from E2E test!\nLine 2\nLine 3"
                 file_path = "test_write_read.txt"
                 
-                write_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/write",
+                write_response = await client.put(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
                     json={"path": file_path, "content": file_content},
                     timeout=120.0,
                 )
                 
                 assert write_response.status_code == 200, f"Write failed: {write_response.text}"
                 
-                # Read it back
-                read_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/read",
-                    json={"path": file_path},
+                # Read it back (GET /filesystem/files?path=...)
+                read_response = await client.get(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
+                    params={"path": file_path},
                     timeout=30.0,
                 )
                 
@@ -632,22 +632,22 @@ class TestE2E06Filesystem:
             sandbox_id = create_response.json()["id"]
             
             try:
-                # Write a file first
-                await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/write",
+                # Write files first (PUT /filesystem/files)
+                await client.put(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
                     json={"path": "file1.txt", "content": "content1"},
                     timeout=120.0,
                 )
-                await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/write",
+                await client.put(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
                     json={"path": "file2.py", "content": "print(1)"},
                     timeout=30.0,
                 )
                 
-                # List directory
-                list_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/list",
-                    json={"path": "."},
+                # List directory (GET /filesystem/directories?path=.)
+                list_response = await client.get(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/directories",
+                    params={"path": "."},
                     timeout=30.0,
                 )
                 
@@ -675,34 +675,33 @@ class TestE2E06Filesystem:
             sandbox_id = create_response.json()["id"]
             
             try:
-                # Write a file
+                # Write a file (PUT /filesystem/files)
                 file_path = "to_delete.txt"
-                await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/write",
+                await client.put(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
                     json={"path": file_path, "content": "will be deleted"},
                     timeout=120.0,
                 )
                 
-                # Verify it exists
-                read_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/read",
-                    json={"path": file_path},
+                # Verify it exists (GET /filesystem/files?path=...)
+                read_response = await client.get(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
+                    params={"path": file_path},
                     timeout=30.0,
                 )
                 assert read_response.status_code == 200
                 
-                # Delete the file
-                delete_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/delete",
-                    json={"path": file_path},
+                # Delete the file (DELETE /filesystem/files?path=...)
+                delete_response = await client.delete(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
+                    params={"path": file_path},
                     timeout=30.0,
                 )
                 assert delete_response.status_code == 200, f"Delete failed: {delete_response.text}"
                 
-                # Try to read - should fail (Ship may return error differently)
-                # We use download here to get proper 404 handling
+                # Try to download - should fail (Ship may return error differently)
                 download_response = await client.get(
-                    f"/v1/sandboxes/{sandbox_id}/files/download",
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/download",
                     params={"path": file_path},
                     timeout=30.0,
                 )
@@ -725,22 +724,22 @@ class TestE2E06Filesystem:
             sandbox_id = create_response.json()["id"]
             
             try:
-                # Write to nested path
+                # Write to nested path (PUT /filesystem/files)
                 file_path = "subdir/deep/file.txt"
                 file_content = "nested content"
                 
-                write_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/write",
+                write_response = await client.put(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
                     json={"path": file_path, "content": file_content},
                     timeout=120.0,
                 )
                 
                 assert write_response.status_code == 200, f"Write failed: {write_response.text}"
                 
-                # Read it back
-                read_response = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/files/read",
-                    json={"path": file_path},
+                # Read it back (GET /filesystem/files?path=...)
+                read_response = await client.get(
+                    f"/v1/sandboxes/{sandbox_id}/filesystem/files",
+                    params={"path": file_path},
                     timeout=30.0,
                 )
                 

@@ -1,0 +1,54 @@
+# Bay E2E test config for Docker container-network mode
+#
+# This config is used when Bay runs in a Docker container and connects to
+# Ship containers via a shared Docker network (container IP direct connect).
+#
+# Usage:
+#   docker-compose -f tests/scripts/docker-network/docker-compose.yaml up
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+database:
+  # Use separate test database (inside container)
+  url: "sqlite+aiosqlite:///./bay-e2e-test.db"
+  echo: false
+
+driver:
+  type: docker
+  docker:
+    socket: "unix:///var/run/docker.sock"
+    # Bay in container, Ship in container - use container network direct connect
+    connect_mode: container_network
+    # Shared network name
+    network: "bay-e2e-test-network"
+    # Disable host port mapping (not needed in container network mode)
+    publish_ports: false
+    host_port: null
+
+workspace:
+  root_path: "/var/lib/bay/workspaces"
+  default_size_limit_mb: 1024
+  mount_path: "/workspace"
+
+security:
+  jwt_secret: "e2e-test-secret-do-not-use-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    runtime_port: 8123
+    resources:
+      cpus: 1.0
+      memory: "1g"
+    capabilities:
+      - filesystem
+      - shell
+      - python
+      - upload
+      - download
+    idle_timeout: 300  # Shorter timeout for tests
+    env: {}

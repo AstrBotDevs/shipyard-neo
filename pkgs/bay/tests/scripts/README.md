@@ -26,10 +26,8 @@ The most common development setup where:
 ### Prerequisites
 
 1. Docker daemon running
-2. `ship:latest` image built:
-   ```bash
-   cd pkgs/ship && make build
-   ```
+
+> **Note:** The test script will automatically build the `ship:latest` image before each test run to ensure the latest code is used.
 
 ### Running Tests
 
@@ -67,14 +65,8 @@ Production-like setup where:
 ### Prerequisites
 
 1. Docker daemon running
-2. `ship:latest` image built:
-   ```bash
-   cd pkgs/ship && make build
-   ```
-3. `bay:latest` image built (or the script will build it):
-   ```bash
-   cd pkgs/bay && make build
-   ```
+
+> **Note:** The test script will automatically build both `ship:latest` and `bay:latest` images before each test run to ensure the latest code is used.
 
 ### Running Tests
 

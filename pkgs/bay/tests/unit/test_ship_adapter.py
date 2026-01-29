@@ -554,10 +554,10 @@ class TestShipAdapterMeta:
 
 
 class TestShipAdapterUploadDownload:
-    """ShipAdapter upload/download tests."""
+    """ShipAdapter upload/download tests (part of filesystem capability)."""
 
     async def test_upload_request_path(self):
-        """upload should POST to /upload."""
+        """upload should POST to /fs/upload."""
         captured_request = None
         
         def handler(request: httpx.Request) -> httpx.Response:
@@ -576,15 +576,15 @@ class TestShipAdapterUploadDownload:
             files = {"file": ("file", b"test data!", "application/octet-stream")}
             data = {"file_path": "test.bin"}
             response = await http_client.post(
-                "http://fake-ship:8123/upload",
+                "http://fake-ship:8123/fs/upload",
                 files=files,
                 data=data,
             )
         
-        assert captured_request.url.path == "/upload"
+        assert captured_request.url.path == "/fs/upload"
 
     async def test_download_request_path(self):
-        """download should GET /download with file_path param."""
+        """download should GET /fs/download with file_path param."""
         captured_request = None
         
         def handler(request: httpx.Request) -> httpx.Response:
@@ -600,10 +600,10 @@ class TestShipAdapterUploadDownload:
         
         async with httpx.AsyncClient(transport=transport) as http_client:
             response = await http_client.get(
-                "http://fake-ship:8123/download",
+                "http://fake-ship:8123/fs/download",
                 params={"file_path": "test.bin"},
             )
         
-        assert captured_request.url.path == "/download"
+        assert captured_request.url.path == "/fs/download"
         assert "file_path=test.bin" in str(captured_request.url)
         assert response.content == b"binary file content"

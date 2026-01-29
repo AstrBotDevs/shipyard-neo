@@ -74,14 +74,6 @@ check_prerequisites() {
     fi
     log_info "✓ Docker is available"
     
-    # Check ship:latest image
-    if ! docker image inspect ship:latest >/dev/null 2>&1; then
-        log_error "ship:latest image not found"
-        log_error "Please build it with: cd pkgs/ship && make build"
-        exit 1
-    fi
-    log_info "✓ ship:latest image found"
-    
     # Check config file
     if [ ! -f "$CONFIG_FILE" ]; then
         log_error "Config file not found: $CONFIG_FILE"
@@ -97,6 +89,22 @@ check_prerequisites() {
         fi
     fi
     log_info "✓ Port $BAY_PORT is available"
+}
+
+build_images() {
+    log_info "Building ship:latest image..."
+    
+    SHIP_DIR="$(cd "${BAY_DIR}/../ship" && pwd)"
+    
+    if [ ! -d "$SHIP_DIR" ]; then
+        log_error "Ship directory not found: $SHIP_DIR"
+        exit 1
+    fi
+    
+    cd "$SHIP_DIR"
+    docker build -t ship:latest .
+    
+    log_info "✓ ship:latest image built"
 }
 
 start_bay_server() {
@@ -159,6 +167,7 @@ done
 
 # Main execution
 check_prerequisites
+build_images
 start_bay_server
 
 # Set environment variable for tests to know which port to use

@@ -49,7 +49,6 @@ htmlcov/
 *.db
 
 # Config file (use config.yaml.example as template)
-config.yaml
 
 # Logs
 *.log

@@ -1,0 +1,51 @@
+# Bay E2E test config for Docker host-port mode
+#
+# This config is used when Bay runs on the host machine and connects to
+# Ship containers via host port mapping (127.0.0.1:<random_port>).
+#
+# Usage:
+#   BAY_CONFIG_FILE=tests/scripts/docker-host/config.yaml uv run python -m app.main
+
+server:
+  host: "127.0.0.1"
+  port: 8001  # Use different port to avoid conflicts with dev server
+
+database:
+  # Use separate test database
+  url: "sqlite+aiosqlite:///./bay-e2e-test.db"
+  echo: false
+
+driver:
+  type: docker
+  docker:
+    socket: "unix:///var/run/docker.sock"
+    # Bay on host, Ship in container - use host port mapping
+    connect_mode: host_port
+    host_address: "127.0.0.1"
+    publish_ports: true
+    host_port: null  # Random port assignment
+    network: null
+
+workspace:
+  root_path: "/var/lib/bay/workspaces"
+  default_size_limit_mb: 1024
+  mount_path: "/workspace"
+
+security:
+  jwt_secret: "e2e-test-secret-do-not-use-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    runtime_port: 8123
+    resources:
+      cpus: 1.0
+      memory: "1g"
+    capabilities:
+      - filesystem
+      - shell
+      - python
+    idle_timeout: 300  # Shorter timeout for tests
+    env: {}

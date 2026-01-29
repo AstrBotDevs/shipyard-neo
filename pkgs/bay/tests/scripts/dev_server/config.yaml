@@ -1,0 +1,51 @@
+# Bay Dev Server config for debugging
+#
+# This config is used for local development and debugging.
+# Container is NOT deleted after sandbox deletion to allow log inspection.
+#
+# Usage:
+#   BAY_CONFIG_FILE=tests/scripts/dev_server/config.yaml uv run python -m app.main
+
+server:
+  host: "127.0.0.1"
+  port: 8002  # Use different port to avoid conflicts
+
+database:
+  # Use separate dev database
+  url: "sqlite+aiosqlite:///./bay-dev.db"
+  echo: true  # Enable SQL logging for debugging
+
+driver:
+  type: docker
+  docker:
+    socket: "unix:///var/run/docker.sock"
+    # Bay on host, Ship in container - use host port mapping
+    connect_mode: host_port
+    host_address: "127.0.0.1"
+    publish_ports: true
+    host_port: null  # Random port assignment
+    network: null
+
+workspace:
+  root_path: "/var/lib/bay/workspaces"
+  default_size_limit_mb: 1024
+  mount_path: "/workspace"
+
+security:
+  jwt_secret: "dev-secret-do-not-use-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    runtime_port: 8123
+    resources:
+      cpus: 1.0
+      memory: "1g"
+    capabilities:
+      - filesystem  # includes upload/download
+      - shell
+      - python
+    idle_timeout: 3600  # 1 hour for dev
+    env: {}
