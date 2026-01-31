@@ -214,6 +214,100 @@ Phase 2            [░░░░░░░░░░░░░░░░░░░░
 
 ---
 
+## 🔧 Phase 3 - 轻量化重构（可选）
+
+> **背景**：有 AI 辅助开发，技术复杂性不再是障碍。以下重构可显著降低资源占用。
+>
+> **详见**：[`REVIEW.md#语言选型讨论`](REVIEW.md#-语言选型讨论python-vs-rustgo)
+
+### 🟢 Bay 编排层 Go 重写
+
+**目标**：用 Go 重写 Bay，追求最小内存占用与最快启动速度
+
+**收益**：
+- 内存：Python ~150MB → Go ~10-30MB（视依赖与驱动实现而定）
+- 启动：Python ~2s → Go ~20-80ms
+- 部署：单一二进制，无解释器依赖
+
+**技术方案（极简优先）**：
+
+- [ ] **Bay-Go HTTP 服务（零框架）**
+  - [ ] 选型：Go 标准库 HTTP（不引入 Web 框架）
+  - [ ] 项目骨架：`pkgs/bay-go/`
+  - [ ] 路由：最小化自研 mux（按 method+path）
+  - [ ] 配置：flag + 环境变量（必要时再引入配置库）
+  - [ ] 日志：Go 标准库 slog（或最小化结构化输出）
+
+- [ ] **数据层迁移（拒绝 ORM 优先）**
+  - [ ] 数据访问：database/sql + 手写 SQL（优先）
+  - [ ] 代码生成：sqlc（可选，但推荐；比 ORM 更轻、更快、更可控）
+  - [ ] ORM 备选：Ent（仅在你明确需要 schema 驱动建模/关系查询时才考虑；默认不要）
+  - [ ] 支持 SQLite + PostgreSQL
+  - [ ] 迁移：golang-migrate（或最小化自研迁移，取决于团队纪律）
+  - [ ] **手写 SQL 的功能测试与安全测试（必须做）**
+    - [ ] 设计数据访问层接口：把所有 SQL 集中到 repository 层，禁止在 handler/manager 里拼 SQL
+    - [ ] 规则：所有查询必须参数化（`QueryContext/ExecContext + args`），禁止 `fmt.Sprintf` 拼接用户输入
+    - [ ] 单元测试（SQLite in-memory）：覆盖每个 repository 的 CRUD 与边界条件
+      - [ ] 空集/不存在：`SELECT` 返回 0 行时行为一致
+      - [ ] 唯一键冲突：插入重复 key 返回可预测错误
+      - [ ] 幂等：同一 idempotency key 重放得到同样结果
+    - [ ] 事务一致性测试：对需要原子性的流程写回归用例
+      - [ ] create sandbox + create locker + create session：任何一步失败都必须回滚
+      - [ ] 并发 ensure_running：只能产生 1 个 session（依赖 DB 约束/锁）
+    - [ ] 集成测试（真实 DB）：在 CI 用容器跑 PostgreSQL，验证迁移 + 查询语义一致
+      - [ ] migrations apply/revert
+      - [ ] 时区/时间精度差异（SQLite vs Postgres）
+    - [ ] 端到端测试复用：复用现有 Bay 的 E2E 场景，对 Bay-Go 做黑盒验证
+    - [ ] SQL 注入回归用例：对所有“用户可控字段”做恶意输入测试
+      - [ ] `"' OR 1=1 --"`
+      - [ ] `"; DROP TABLE sandboxes; --"`
+      - [ ] 期望：查询失败或按字面值处理，且不产生额外副作用
+    - [ ] Fuzz 测试：对过滤条件/排序/分页入参做 fuzz，确保不会走到字符串拼 SQL 的路径
+    - [ ] 静态检查（CI 必跑）：`go test -race` + `gosec` + `staticcheck`（至少覆盖 database/sql 的误用模式）
+
+- [ ] **Driver 层**
+  - [ ] DockerDriver：使用 Docker Go SDK（或用 docker CLI 子进程方式做最小依赖版）
+  - [ ] 端口映射/容器网络逻辑复用
+
+- [ ] **Manager 层**
+  - [ ] SandboxManager：sync.Mutex（按 sandbox_id 粒度）
+  - [ ] SessionManager：context 超时控制
+  - [ ] 幂等性：数据库 UNIQUE 约束（避免引入额外组件）
+
+- [ ] **API 层**
+  - [ ] REST API 完全兼容 Python 版本
+  - [ ] OpenAPI spec 复用
+
+- [ ] **测试与验证**
+  - [ ] 使用现有 E2E 测试验证兼容性
+  - [ ] 性能基准对比（启动时间、内存、QPS）
+
+### 🟡 路径安全模块 Rust FFI（可选）
+
+**目标**：用 Rust 实现安全关键的路径校验逻辑，编译为 Python 扩展
+
+**适用场景**：如果保持 Python Bay，但需要增强安全性
+
+- [ ] **Rust 核心模块**
+  - [ ] `path_validator` crate
+  - [ ] 路径规范化、穿越检测
+  - [ ] 使用 PyO3 绑定
+
+- [ ] **Python 集成**
+  - [ ] `bay-security` Python 包
+  - [ ] 替换现有 `resolve_path` 调用
+
+### 📊 重写优先级评估
+
+| 组件 | 语言 | 优先级 | 预估工作量 | ROI |
+|:---|:---|:---|:---|:---|
+| Bay 编排层 | Go | ⭐⭐⭐ | 2-3 周 | 高：内存/启动/部署 |
+| 路径安全 FFI | Rust | ⭐⭐ | 3-5 天 | 中：安全性增强 |
+| Ship 运行时 | Python | 不重写 | - | N/A：核心依赖 IPython |
+| SDK | Python | 不重写 | - | N/A：目标用户是 Python |
+
+---
+
 ## 📁 相关文档索引
 
 | 文档 | 说明 |
