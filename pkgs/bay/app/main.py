@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request
@@ -41,8 +40,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
-    settings = get_settings()
-
+    get_settings()
     app = FastAPI(
         title="Bay",
         description="Orchestration layer for Ship containers",

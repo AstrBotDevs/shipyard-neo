@@ -18,9 +18,9 @@ from sqlmodel import select
 
 from app.config import ProfileConfig, get_settings
 from app.drivers.base import ContainerStatus, Driver
-from app.errors import NotFoundError, SessionNotReadyError
-from app.models.session import Session, SessionStatus
+from app.errors import SessionNotReadyError
 from app.models.cargo import Cargo
+from app.models.session import Session, SessionStatus
 
 logger = structlog.get_logger()
 
@@ -45,12 +45,12 @@ class SessionManager:
         profile: ProfileConfig,
     ) -> Session:
         """Create a new session record (does not start container).
-        
+
         Args:
             sandbox_id: Sandbox ID
             cargo: Cargo to mount
             profile: Profile configuration
-            
+
         Returns:
             Created session
         """
@@ -92,17 +92,17 @@ class SessionManager:
         profile: ProfileConfig,
     ) -> Session:
         """Ensure session is running - create/start container if needed.
-        
+
         This is the core idempotent startup logic.
-        
+
         Args:
             session: Session to ensure is running
             cargo: Cargo to mount
             profile: Profile configuration
-            
+
         Returns:
             Updated session with endpoint
-            
+
         Raises:
             SessionNotReadyError: If session is starting but not ready yet
         """
@@ -148,10 +148,10 @@ class SessionManager:
                     runtime_port=int(profile.runtime_port or 8000),
                 )
                 session.endpoint = endpoint
-                
+
                 # Wait for Ship runtime to be ready before marking as RUNNING
                 await self._wait_for_ready(endpoint, session.id)
-                
+
                 session.observed_state = SessionStatus.RUNNING
                 session.last_observed_at = datetime.utcnow()
                 await self._db.commit()
@@ -179,10 +179,10 @@ class SessionManager:
         backoff_factor: float = 2.0,
     ) -> None:
         """Wait for Ship runtime to be ready using exponential backoff.
-        
+
         Polls the /health endpoint until it responds successfully.
         Uses generous timeouts to accommodate image pulling in production.
-        
+
         Args:
             endpoint: Ship endpoint URL
             session_id: Session ID for logging
@@ -190,16 +190,16 @@ class SessionManager:
             initial_interval: Initial retry interval in seconds
             max_interval: Maximum retry interval in seconds
             backoff_factor: Multiplier for exponential backoff
-            
+
         Raises:
             SessionNotReadyError: If runtime doesn't become ready in time
         """
         url = f"{endpoint.rstrip('/')}/health"
-        
+
         start_time = asyncio.get_event_loop().time()
         interval = initial_interval
         attempt = 0
-        
+
         while True:
             attempt += 1
             try:
@@ -216,15 +216,15 @@ class SessionManager:
                         return
             except (httpx.RequestError, httpx.TimeoutException):
                 pass
-            
+
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed >= max_wait_seconds:
                 break
-            
+
             # Exponential backoff with max cap
             await asyncio.sleep(min(interval, max_wait_seconds - elapsed))
             interval = min(interval * backoff_factor, max_interval)
-        
+
         self._log.error(
             "session.runtime_not_ready",
             session_id=session_id,
@@ -240,7 +240,7 @@ class SessionManager:
 
     async def stop(self, session: Session) -> None:
         """Stop a session (reclaim compute).
-        
+
         Args:
             session: Session to stop
         """
@@ -260,7 +260,7 @@ class SessionManager:
 
     async def destroy(self, session: Session) -> None:
         """Destroy a session completely.
-        
+
         Args:
             session: Session to destroy
         """
@@ -274,10 +274,10 @@ class SessionManager:
 
     async def refresh_status(self, session: Session) -> Session:
         """Refresh session status from driver.
-        
+
         Args:
             session: Session to refresh
-            
+
         Returns:
             Updated session
         """

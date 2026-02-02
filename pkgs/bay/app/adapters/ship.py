@@ -24,7 +24,7 @@ logger = structlog.get_logger()
 
 class ShipAdapter(BaseAdapter):
     """HTTP adapter for Ship runtime.
-    
+
     Supported capabilities: python, shell, filesystem (includes upload/download), terminal
     """
 
