@@ -13,4 +13,4 @@ router = APIRouter()
 router.include_router(sandboxes_router, prefix="/sandboxes", tags=["sandboxes"])
 router.include_router(capabilities_router, prefix="/sandboxes", tags=["capabilities"])
 router.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
-router.include_router(admin_router)  # /admin prefix is in the router itself
+router.include_router(admin_router, prefix="/admin", tags=["admin"])

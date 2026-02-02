@@ -1,255 +1,248 @@
-"""E2E API tests configuration and shared fixtures for Bay.
+"""E2E integration tests configuration for Bay.
 
-These tests require:
-- Docker daemon running and accessible
-- ship:latest image built and available
-- Bay server running on http://localhost:8000
+Prerequisites:
+- Docker daemon running
+- ship:latest image available
+- Bay server running
 
-See: plans/phase-1/tests.md section 1
+## Execution Groups
+
+Tests use pytest-xdist for parallel execution:
+
+  pytest tests/integration -n auto --dist loadgroup
+
+Group assignment is centralized here via pytest_collection_modifyitems hook.
+Do NOT use @xdist_group decorators in test files - add patterns to SERIAL_GROUPS.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import subprocess
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, AsyncGenerator
 
 import httpx
 import pytest
 
-# Bay API base URL - can be overridden by E2E_BAY_PORT environment variable
-_bay_port = os.environ.get("E2E_BAY_PORT", "8001")
-BAY_BASE_URL = f"http://127.0.0.1:{_bay_port}"
+if TYPE_CHECKING:
+    from _pytest.config import Config
+    from _pytest.python import Function
 
-# Test configuration
-# API Key for E2E tests (must match config in tests/scripts/docker-host/config.yaml)
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+BAY_BASE_URL = f"http://127.0.0.1:{os.environ.get('E2E_BAY_PORT', '8001')}"
 E2E_API_KEY = os.environ.get("E2E_API_KEY", "e2e-test-api-key")
 AUTH_HEADERS = {"Authorization": f"Bearer {E2E_API_KEY}"}
 DEFAULT_PROFILE = "python-default"
 
 
-def is_bay_running() -> bool:
-    """Check if Bay is running."""
+# =============================================================================
+# SERIAL TEST GROUPS - Tests that must run serially
+# =============================================================================
+#
+# 目标：实现“两阶段一口气跑完”
+# - Phase 1（并行）：跑所有未被标记为 serial 的测试（-n auto）
+# - Phase 2（串行/独占）：跑所有 serial 测试（-n 1，确保 Bay 上同一时间只有一个测试在跑）
+#
+# SERIAL_GROUPS 的作用：
+# - 给必须串行的测试按语义分组（timing/gc/workflows/…）
+# - collection 时自动打上：
+#   - pytest.mark.serial
+#   - pytest.mark.serial_group("<group>")
+#   - pytest.mark.xdist_group("<group>")
+#
+# 注意：测试文件内不要手写 xdist_group/serial 标记，统一在这里管理。
+
+SERIAL_GROUPS = {
+    # Timing-sensitive tests - TTL expiration depends on wall clock
+    "timing": [
+        r"core/test_extend_ttl\.py::test_extend_ttl_rejects_expired",
+        r"test_long_running_extend_ttl\.py::",
+    ],
+    # GC tests - must be exclusive (Phase 2, -n 1)
+    "gc": [
+        r"/gc/",  # All tests in integration/gc/ directory
+        r"test_gc_.*\.py::",
+    ],
+    # Workflow tests - scenario-style tests, prefer serial execution
+    "workflows": [
+        r"workflows/",
+        # Back-compat: legacy workflow-style tests still in root
+        r"test_.*workflow.*\.py::",
+        r"test_mega_workflow\.py::",
+        r"test_interactive_workflow\.py::",
+        r"test_agent_coding_workflow\.py::",
+        r"test_script_development\.py::",
+        r"test_project_init\.py::",
+        r"test_serverless_execution\.py::",
+    ],
+}
+
+_COMPILED_GROUPS: dict[str, list[re.Pattern]] = {
+    group: [re.compile(p) for p in patterns]
+    for group, patterns in SERIAL_GROUPS.items()
+}
+
+
+def pytest_configure(config: Config) -> None:
+    """Register custom markers for clarity in `pytest --markers` / CI."""
+    config.addinivalue_line(
+        "markers",
+        "serial: run in Phase 2 with -n 1 to ensure exclusive execution against Bay",
+    )
+    config.addinivalue_line(
+        "markers",
+        "serial_group(name): semantic serial group name (timing/gc/workflows/...)",
+    )
+
+
+def pytest_collection_modifyitems(config: Config, items: list[Function]) -> None:
+    """Assign markers based on SERIAL_GROUPS.
+
+    - Matched tests: serial + serial_group(<name>) + xdist_group(<name>)
+    - Unmatched tests: remain parallel-eligible (Phase 1)
+    """
+    for item in items:
+        for group, patterns in _COMPILED_GROUPS.items():
+            if any(p.search(item.nodeid) for p in patterns):
+                item.add_marker(pytest.mark.serial)
+                item.add_marker(pytest.mark.serial_group(group))
+                item.add_marker(pytest.mark.xdist_group(group))
+                break
+
+
+# =============================================================================
+# ENVIRONMENT CHECKS
+# =============================================================================
+
+def _check_docker() -> bool:
     try:
-        response = httpx.get(f"{BAY_BASE_URL}/health", timeout=2.0)
-        return response.status_code == 200
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0
     except Exception:
         return False
 
 
-def is_docker_available() -> bool:
-    """Check if Docker is available."""
+def _check_ship_image() -> bool:
     try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def is_ship_image_available() -> bool:
-    """Check if ship:latest image exists."""
-    try:
-        result = subprocess.run(
+        return subprocess.run(
             ["docker", "image", "inspect", "ship:latest"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
+            capture_output=True, timeout=5
+        ).returncode == 0
     except Exception:
         return False
 
 
-def docker_volume_exists(volume_name: str) -> bool:
-    """Check if a Docker volume exists."""
+def _check_bay() -> bool:
     try:
-        result = subprocess.run(
-            ["docker", "volume", "inspect", volume_name],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
+        return httpx.get(f"{BAY_BASE_URL}/health", timeout=2.0).status_code == 200
     except Exception:
         return False
 
 
-def docker_container_exists(container_name: str) -> bool:
-    """Check if a Docker container exists (running or stopped)."""
-    try:
-        result = subprocess.run(
-            ["docker", "container", "inspect", container_name],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-# Skip all E2E tests if prerequisites not met
 e2e_skipif_marks = [
-    pytest.mark.skipif(
-        not is_docker_available(),
-        reason="Docker is not available",
-    ),
-    pytest.mark.skipif(
-        not is_ship_image_available(),
-        reason="ship:latest image not found. Run: cd pkgs/ship && make build",
-    ),
-    pytest.mark.skipif(
-        not is_bay_running(),
-        reason="Bay is not running. Start with: cd pkgs/bay && uv run python -m app.main",
-    ),
+    pytest.mark.skipif(not _check_docker(), reason="Docker unavailable"),
+    pytest.mark.skipif(not _check_ship_image(), reason="ship:latest not found"),
+    pytest.mark.skipif(not _check_bay(), reason="Bay not running"),
 ]
 
-# Combined pytest mark for E2E tests
 pytestmark = e2e_skipif_marks
 
-# pytest-xdist parallel execution configuration
-# Most E2E tests can run in parallel because each creates/deletes its own sandbox.
-# GC tests need serial execution to avoid interference with other sandboxes.
-#
-# Usage:
-#   Parallel: pytest tests/integration -n auto --dist loadgroup
-#   Serial:   pytest tests/integration (default)
-#
-# Tests marked with @pytest.mark.xdist_group("gc") will run in the same worker,
-# effectively serializing them. Use this for GC tests.
-gc_serial_mark = pytest.mark.xdist_group("gc")
+
+# =============================================================================
+# DOCKER HELPERS
+# =============================================================================
+
+def docker_volume_exists(name: str) -> bool:
+    try:
+        return subprocess.run(
+            ["docker", "volume", "inspect", name],
+            capture_output=True, timeout=5
+        ).returncode == 0
+    except Exception:
+        return False
 
 
-# ---- GC Admin API helpers ----
+def docker_container_exists(name: str) -> bool:
+    try:
+        return subprocess.run(
+            ["docker", "container", "inspect", name],
+            capture_output=True, timeout=5
+        ).returncode == 0
+    except Exception:
+        return False
 
-import asyncio
 
+# =============================================================================
+# SANDBOX FIXTURES
+# =============================================================================
+
+@asynccontextmanager
+async def create_sandbox(
+    client: httpx.AsyncClient,
+    *,
+    profile: str = DEFAULT_PROFILE,
+    ttl: int | None = None,
+) -> AsyncGenerator[dict, None]:
+    """Create sandbox with auto-cleanup."""
+    body: dict = {"profile": profile}
+    if ttl is not None:
+        body["ttl"] = ttl
+
+    resp = await client.post("/v1/sandboxes", json=body)
+    assert resp.status_code == 201, f"Create failed: {resp.text}"
+    sandbox = resp.json()
+
+    try:
+        yield sandbox
+    finally:
+        await client.delete(f"/v1/sandboxes/{sandbox['id']}")
+
+
+# =============================================================================
+# GC HELPERS
+# =============================================================================
 
 async def trigger_gc(
     client: httpx.AsyncClient,
     *,
+    tasks: list[str] | None = None,
     max_retries: int = 10,
-    retry_delay: float = 0.5
+    retry_delay: float = 0.5,
 ) -> dict:
-    """Trigger a full GC cycle and wait for completion.
-
-    Uses POST /v1/admin/gc/run to manually trigger GC.
-    This is the recommended way to test GC behavior without relying on
-    automatic timing.
-
-    If GC is already running (HTTP 423), this function will retry with
-    exponential backoff until the lock is released.
+    """Trigger GC with retry on lock.
 
     Args:
-        client: httpx.AsyncClient with auth headers configured
-        max_retries: Maximum number of retries if GC is locked (default: 10)
-        retry_delay: Initial delay between retries in seconds (default: 0.5)
-
-    Returns:
-        GC run response with results from each task
-
-    Raises:
-        AssertionError: If GC returns non-200 status after all retries
-
-    Example:
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
-            result = await trigger_gc(client)
-            assert result["total_cleaned"] >= 1
+        tasks: Specific tasks to run, or None for full GC.
+               Options: idle_session, expired_sandbox, orphan_workspace, orphan_container
     """
+    body = {"tasks": tasks} if tasks else None
     delay = retry_delay
+
     for attempt in range(max_retries + 1):
         try:
-            # GC can take a long time if there are many resources to clean
-            response = await client.post("/v1/admin/gc/run", timeout=120.0)
+            resp = await client.post("/v1/admin/gc/run", json=body, timeout=120.0)
         except httpx.ReadTimeout:
-            # GC is still running, wait and retry
             if attempt < max_retries:
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, 5.0)
                 continue
-            else:
-                raise AssertionError(
-                    f"GC timed out after {max_retries} retries"
-                )
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 423:
-            # GC is already running, wait and retry
-            if attempt < max_retries:
-                await asyncio.sleep(delay)
-                delay = min(delay * 1.5, 5.0)  # Exponential backoff, max 5s
-                continue
-            else:
-                raise AssertionError(
-                    f"GC still locked after {max_retries} retries: {response.text}"
-                )
-        else:
-            raise AssertionError(f"GC failed with status {response.status_code}: {response.text}")
-    
-    # Should not reach here, but just in case
-    raise AssertionError("GC trigger failed unexpectedly")
+            raise AssertionError(f"GC timed out after {max_retries} retries")
 
-
-async def trigger_gc_task(
-    client: httpx.AsyncClient,
-    task: str,
-    *,
-    max_retries: int = 10,
-    retry_delay: float = 0.5
-) -> dict:
-    """Trigger a specific GC task and wait for completion.
-
-    If GC is already running (HTTP 423), this function will retry with
-    exponential backoff until the lock is released.
-
-    Args:
-        client: httpx.AsyncClient with auth headers configured
-        task: Task name - one of:
-            - "idle_session"
-            - "expired_sandbox"
-            - "orphan_workspace"
-            - "orphan_container"
-        max_retries: Maximum number of retries if GC is locked (default: 10)
-        retry_delay: Initial delay between retries in seconds (default: 0.5)
-
-    Returns:
-        GC run response with results
-
-    Example:
-        result = await trigger_gc_task(client, "expired_sandbox")
-        assert result["total_cleaned"] >= 1
-    """
-    delay = retry_delay
-    for attempt in range(max_retries + 1):
-        try:
-            # GC can take a long time if there are many resources to clean
-            response = await client.post("/v1/admin/gc/run", json={"tasks": [task]}, timeout=120.0)
-        except httpx.ReadTimeout:
-            # GC is still running, wait and retry
+        if resp.status_code == 200:
+            return resp.json()
+        elif resp.status_code == 423:
             if attempt < max_retries:
                 await asyncio.sleep(delay)
                 delay = min(delay * 1.5, 5.0)
                 continue
-            else:
-                raise AssertionError(
-                    f"GC task {task} timed out after {max_retries} retries"
-                )
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 423:
-            # GC is already running, wait and retry
-            if attempt < max_retries:
-                await asyncio.sleep(delay)
-                delay = min(delay * 1.5, 5.0)  # Exponential backoff, max 5s
-                continue
-            else:
-                raise AssertionError(
-                    f"GC task {task} still locked after {max_retries} retries: {response.text}"
-                )
+            raise AssertionError(f"GC locked after {max_retries} retries")
         else:
-            raise AssertionError(f"GC task {task} failed with status {response.status_code}: {response.text}")
-    
-    # Should not reach here, but just in case
-    raise AssertionError(f"GC task {task} trigger failed unexpectedly")
+            raise AssertionError(f"GC failed: {resp.status_code} {resp.text}")
+
+    raise AssertionError("GC failed unexpectedly")

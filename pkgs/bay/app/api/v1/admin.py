@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 from app.api.dependencies import AuthDep
 from app.services.gc.lifecycle import get_gc_scheduler
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Prefix is applied by the parent v1 router for consistency.
+router = APIRouter()
 
 
 # ---- Request/Response Models ----
@@ -107,8 +108,13 @@ async def run_gc(
     start = time.monotonic()
 
     # Run GC cycle
-    # TODO: Support task filtering via request.tasks
+    # If request.tasks is provided, run only those tasks (in scheduler order).
+    # Unknown task names are ignored.
     results = await scheduler.run_once()
+
+    if request and request.tasks is not None:
+        allowed = set(request.tasks)
+        results = [r for r in results if (r.task_name or "") in allowed]
 
     duration_ms = int((time.monotonic() - start) * 1000)
 

@@ -151,18 +151,26 @@ start_bay_server() {
 run_tests() {
     local parallel_mode="$1"
     shift
-    
+
     log_info "Running E2E tests (docker-host mode)..."
-    
+
     cd "$BAY_DIR"
-    
+
+    # IMPORTANT:
+    # - Phase 1: parallel, exclude serial tests
+    # - Phase 2: exclusive, run serial tests with -n 1
+    # This avoids GC/workflow/timing tests overlapping with other tests.
     if [ "$parallel_mode" = "true" ]; then
-        log_info "Running tests in parallel mode with pytest-xdist"
-        # Use -n auto for automatic worker detection, --dist loadgroup for xdist_group support
-        uv run pytest tests/integration/test_e2e_api.py -n auto --dist loadgroup "$@"
+        log_info "Running tests in two-phase mode (parallel + exclusive serial)"
+
+        log_info "Phase 1: parallel (not serial)"
+        uv run pytest tests/integration -n auto --dist loadgroup -m "not serial" "$@"
+
+        log_info "Phase 2: exclusive serial (-n 1)"
+        uv run pytest tests/integration -n 1 -m "serial" "$@"
     else
         log_info "Running tests in serial mode"
-        uv run pytest tests/integration/test_e2e_api.py "$@"
+        uv run pytest tests/integration "$@"
     fi
 }
 

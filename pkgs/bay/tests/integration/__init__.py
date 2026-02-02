@@ -1,28 +1,24 @@
 """Integration/E2E tests for Bay.
 
-Core API Test Modules:
-- test_auth: E2E-00 Authentication
-- test_minimal_path: E2E-01 Minimal path (create → python/exec)
-- test_stop: E2E-02 Stop (reclaim compute only)
-- test_delete: E2E-03 Delete (complete destruction)
-- test_concurrent: E2E-04 Concurrent ensure_running
-- test_file_transfer: E2E-05 File upload and download
-- test_filesystem: E2E-06 Filesystem operations
-- test_idempotency_e2e: E2E-07 Idempotency-Key support
-- test_extend_ttl: E2E-XX Extend sandbox TTL (POST /v1/sandboxes/{id}/extend_ttl)
-- test_capability_enforcement: E2E-12 Profile-level capability enforcement
+目录结构（重构后）：
+- `core/`：核心 API 行为（auth、sandbox lifecycle、idempotency、并发、extend_ttl）
+- `filesystem/`：文件系统与传输
+- `security/`：路径安全、capability/profile enforcement
+- `shell/`：shell 执行与工具链
+- `isolation/`：容器隔离
+- `workflows/`：高层场景测试（默认串行/独占）
+- `gc/`：GC 测试（必须串行/独占）
 
-Workflow Scenario Tests (from e2e-workflow-scenarios.md):
-- test_interactive_workflow: E2E-08 Interactive Data Analysis (Scenario 1)
-- test_script_development: E2E-09 Script Development and Debugging (Scenario 2)
-- test_project_init: E2E-10 Project Initialization and Dependencies (Scenario 3)
-- test_serverless_execution: E2E-11 Simple Quick Execution (Scenario 4)
-- test_long_running_extend_ttl: E2E-13 Long Running Task with TTL Extension (Scenario 5)
-- test_agent_coding_workflow: E2E-14 AI Agent Code Generation and Iterative Fix (Scenario 6)
+执行策略：
+- 默认并行 + loadgroup：依赖 [`SERIAL_GROUPS`](pkgs/bay/tests/integration/conftest.py:62) 在 collection 阶段统一打 `serial` / `xdist_group`。
+- 建议“两阶段一口气跑完”：
 
-Configuration:
-- conftest: Shared fixtures and helper functions
+    pytest pkgs/bay/tests/integration -n auto --dist loadgroup -m "not serial"
+    pytest pkgs/bay/tests/integration -n 1 -m "serial"
 
-Legacy Entry Point:
-- test_e2e_api: Re-exports all test classes for backward compatibility
+入口说明：
+- 人类入口/运行器：[`pkgs/bay/tests/integration/test_e2e_api.py`](pkgs/bay/tests/integration/test_e2e_api.py:1)
+- 运行时脚本：
+  - docker-host：[`pkgs/bay/tests/scripts/docker-host/run.sh`](pkgs/bay/tests/scripts/docker-host/run.sh:1)
+  - docker-network：[`pkgs/bay/tests/scripts/docker-network/run.sh`](pkgs/bay/tests/scripts/docker-network/run.sh:1)
 """
