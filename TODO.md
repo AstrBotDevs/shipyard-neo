@@ -78,32 +78,32 @@ Phase 2            [░░░░░░░░░░░░░░░░░░░░
 
 ---
 
-## 🚨 P0 - 最高优先级：命名重构（Workspace → Locker）
+## 🚨 P0 - 最高优先级：命名重构（Workspace → Cargo）
 
-> **决策**：将 Workspace 重命名为 Locker，延续航海拟物化命名风格
+> **决策**：将 Workspace 重命名为 Cargo，延续航海拟物化命名风格
 >
-> **理由**：在继续开发新功能之前完成重命名，避免后续更大范围的改动
+> **理由**：Cargo（货物）是船运输的核心对象，语义上比 Locker 更准确——存储的是"要处理的数据"而非"存放东西的地方"
 
 **命名体系**：
 ```
 🏖️ Bay    - 港湾 (管理层，调度中心)
 🚢 Ship   - 船 (运行时，计算载体)
-🔐 Locker - 储物柜 (数据持久化，安全存储)
+📦 Cargo  - 货物 (数据持久化，要处理的内容)
 ```
 
 **重命名范围**：
 
 - [ ] **设计文档更新**
-  - [ ] `plans/bay-design.md` - 概念模型中 Workspace → Locker
+  - [ ] `plans/bay-design.md` - 概念模型中 Workspace → Cargo
   - [ ] `plans/bay-concepts.md` - 数据概念更新
-  - [ ] `plans/bay-api.md` - API 路径更新 `/workspaces` → `/lockers`
+  - [ ] `plans/bay-api.md` - API 路径更新 `/workspaces` → `/cargos`
   - [ ] `plans/phase-1/*.md` - 相关引用更新
 - [ ] **Bay 代码重构**
-  - [ ] `pkgs/bay/app/models/workspace.py` → `locker.py`
-  - [ ] `pkgs/bay/app/managers/workspace/` → `locker/`
-  - [ ] API 路由 `/v1/workspaces` → `/v1/lockers`
-  - [ ] 数据库表名 `workspaces` → `lockers`
-  - [ ] 字段名 `workspace_id` → `locker_id`
+  - [ ] `pkgs/bay/app/models/workspace.py` → `cargo.py`
+  - [ ] `pkgs/bay/app/managers/workspace/` → `cargo/`
+  - [ ] API 路由 `/v1/workspaces` → `/v1/cargos`
+  - [ ] 数据库表名 `workspaces` → `cargos`
+  - [ ] 字段名 `workspace_id` → `cargo_id`
   - [ ] `managed_by_sandbox_id` 保持不变
 - [ ] **Ship 代码更新**
   - [ ] `pkgs/ship/app/workspace.py` 更新引用
@@ -160,16 +160,16 @@ Phase 2            [░░░░░░░░░░░░░░░░░░░░
 - [x] Idempotency-Key 支持
 - [x] E2E 测试覆盖 (`test_extend_ttl.py`, `test_long_running_extend_ttl.py`)
 
-### 🟠 中优先级：Locker API
+### 🟠 中优先级：Cargo API
 
 > 详见 [`plans/bay-api.md#6.3`](plans/bay-api.md)（重命名后）
 
-- [ ] `POST /v1/lockers` - 创建独立 Locker
-- [ ] `GET /v1/lockers` - 列出 Lockers
-- [ ] `GET /v1/lockers/{id}` - 查询 Locker
-- [ ] `DELETE /v1/lockers/{id}` - 删除 Locker
-- [ ] `POST /v1/lockers/{id}/files/read` - 直读文件
-- [ ] `POST /v1/lockers/{id}/files/write` - 直写文件
+- [ ] `POST /v1/cargos` - 创建独立 Cargo
+- [ ] `GET /v1/cargos` - 列出 Cargos
+- [ ] `GET /v1/cargos/{id}` - 查询 Cargo
+- [ ] `DELETE /v1/cargos/{id}` - 删除 Cargo
+- [ ] `POST /v1/cargos/{id}/files/read` - 直读文件
+- [ ] `POST /v1/cargos/{id}/files/write` - 直写文件
 - [ ] 权限控制（更高 scope）
 - [ ] managed vs external 删除规则
 
