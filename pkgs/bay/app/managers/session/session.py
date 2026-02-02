@@ -41,14 +41,14 @@ class SessionManager:
     async def create(
         self,
         sandbox_id: str,
-        workspace: Cargo,
+        cargo: Cargo,
         profile: ProfileConfig,
     ) -> Session:
         """Create a new session record (does not start container).
         
         Args:
             sandbox_id: Sandbox ID
-            workspace: Cargo to mount
+            cargo: Cargo to mount
             profile: Profile configuration
             
         Returns:
@@ -88,7 +88,7 @@ class SessionManager:
     async def ensure_running(
         self,
         session: Session,
-        workspace: Cargo,
+        cargo: Cargo,
         profile: ProfileConfig,
     ) -> Session:
         """Ensure session is running - create/start container if needed.
@@ -97,7 +97,7 @@ class SessionManager:
         
         Args:
             session: Session to ensure is running
-            workspace: Cargo to mount
+            cargo: Cargo to mount
             profile: Profile configuration
             
         Returns:
@@ -134,7 +134,7 @@ class SessionManager:
             container_id = await self._driver.create(
                 session=session,
                 profile=profile,
-                workspace=workspace,
+                cargo=cargo,
             )
 
             session.container_id = container_id
