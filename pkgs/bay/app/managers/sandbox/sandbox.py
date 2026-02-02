@@ -66,7 +66,7 @@ class SandboxManager:
         Args:
             owner: Owner identifier
             profile_id: Profile ID
-            cargo_id: Optional existing workspace ID
+            cargo_id: Optional existing cargo ID
             ttl: Time-to-live in seconds (None/0 = no expiry)
             
         Returns:
@@ -86,13 +86,13 @@ class SandboxManager:
             profile_id=profile_id,
         )
 
-        # Create or get workspace
+        # Create or get cargo
         if cargo_id:
-            # Use existing external workspace
-            workspace = await self._cargo_mgr.get(cargo_id, owner)
+            # Use existing external cargo
+            cargo = await self._cargo_mgr.get(cargo_id, owner)
         else:
-            # Create managed workspace
-            workspace = await self._cargo_mgr.create(
+            # Create managed cargo
+            cargo = await self._cargo_mgr.create(
                 owner=owner,
                 managed=True,
                 managed_by_sandbox_id=sandbox_id,
@@ -108,7 +108,7 @@ class SandboxManager:
             id=sandbox_id,
             owner=owner,
             profile_id=profile_id,
-            cargo_id=workspace.id,
+            cargo_id=cargo.id,
             expires_at=expires_at,
             created_at=datetime.utcnow(),
             last_active_at=datetime.utcnow(),
@@ -227,9 +227,9 @@ class SandboxManager:
             if locked_sandbox is None:
                 raise NotFoundError(f"Sandbox not found: {sandbox_id}")
 
-            # Re-fetch workspace after rollback (objects are expired after rollback)
-            workspace = await self._cargo_mgr.get_by_id(cargo_id)
-            if workspace is None:
+            # Re-fetch cargo after rollback (objects are expired after rollback)
+            cargo = await self._cargo_mgr.get_by_id(cargo_id)
+            if cargo is None:
                 raise NotFoundError(f"Cargo not found: {cargo_id}")
 
             # Check if we have a current session (re-check after acquiring lock)
@@ -241,7 +241,7 @@ class SandboxManager:
             if session is None:
                 session = await self._session_mgr.create(
                     sandbox_id=locked_sandbox.id,
-                    workspace=workspace,
+                    cargo=cargo,
                     profile=profile,
                 )
                 locked_sandbox.current_session_id = session.id
@@ -250,7 +250,7 @@ class SandboxManager:
             # Ensure session is running
             session = await self._session_mgr.ensure_running(
                 session=session,
-                workspace=workspace,
+                cargo=cargo,
                 profile=profile,
             )
 
@@ -338,7 +338,7 @@ class SandboxManager:
         await self._db.commit()
 
     async def stop(self, sandbox: Sandbox) -> None:
-        """Stop sandbox - reclaim compute, keep workspace.
+        """Stop sandbox - reclaim compute, keep cargo.
         
         Idempotent: repeated calls maintain final state consistency.
         Uses same lock as ensure_running to prevent race conditions.
@@ -384,8 +384,8 @@ class SandboxManager:
         """Delete sandbox permanently.
         
         - Destroys all sessions
-        - Cascade deletes managed workspace
-        - Does NOT cascade delete external workspace
+        - Cascade deletes managed cargo
+        - Does NOT cascade delete external cargo
         Uses same lock as ensure_running to prevent race conditions.
         
         Args:
@@ -422,18 +422,18 @@ class SandboxManager:
             for session in sessions:
                 await self._session_mgr.destroy(session)
 
-            # Get workspace (re-fetch after rollback)
-            workspace = await self._cargo_mgr.get_by_id(cargo_id)
+            # Get cargo (re-fetch after rollback)
+            cargo = await self._cargo_mgr.get_by_id(cargo_id)
 
             # Soft delete sandbox
             locked_sandbox.deleted_at = datetime.utcnow()
             locked_sandbox.current_session_id = None
             await self._db.commit()
 
-            # Cascade delete managed workspace
-            if workspace and workspace.managed:
+            # Cascade delete managed cargo
+            if cargo and cargo.managed:
                 await self._cargo_mgr.delete(
-                    workspace.id,
+                    cargo.id,
                     owner,
                     force=True,  # Allow deleting managed workspace
                 )
