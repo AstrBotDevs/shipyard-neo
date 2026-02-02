@@ -1,4 +1,4 @@
-cha'kan# Shipyard-Neo 代码审查清单
+# Shipyard-Neo 代码审查清单
 
 > **审查者视角**: Linus Torvalds 风格的代码质量审查
 >
@@ -6,6 +6,8 @@ cha'kan# Shipyard-Neo 代码审查清单
 > - "好品味"是让特殊情况消失、数据结构正确、代码简洁清晰
 > - **轻量化优先**：拒绝引入不必要的重型依赖，用最简单的方案解决实际问题
 > - "Theory loses. Every single time." — 解决真实问题，不做过度设计
+>
+> **最后更新**: 2026-02-02
 
 ---
 
@@ -19,44 +21,49 @@ cha'kan# Shipyard-Neo 代码审查清单
 
 ## 🔴 高优先级审查项
 
-### 1. 并发控制与锁机制
+### 1. ✅ 并发控制与锁机制（已改进）
 
-**文件**: [`pkgs/bay/app/managers/sandbox/sandbox.py`](pkgs/bay/app/managers/sandbox/sandbox.py:37)
+**文件**: [`pkgs/bay/app/concurrency/locks.py`](pkgs/bay/app/concurrency/locks.py)
 
-**问题**: 使用了全局字典 `_sandbox_locks` 做内存锁，存在以下风险：
+**当前状态**: 已重构为独立模块，提供更好的锁管理。
 
 ```python
-# 当前实现
-_sandbox_locks: dict[str, asyncio.Lock] = {}
-_sandbox_locks_lock = asyncio.Lock()
+# 新实现 - 独立的锁模块
+async def get_sandbox_lock(sandbox_id: str) -> asyncio.Lock
+async def cleanup_sandbox_lock(sandbox_id: str) -> None
+async def cleanup_deleted_sandbox_locks(active_sandbox_ids: set[str]) -> None
 ```
 
-**审查要点**:
-- [ ] 内存锁在多实例部署时完全失效，仅靠 `SELECT FOR UPDATE` 可能不够
-- [ ] `_cleanup_sandbox_lock()` 可能在 sandbox 仍在使用时被调用（竞态条件）
-- [ ] 锁字典会无限增长，没有清理过期锁的机制
-- [ ] [`ensure_running()`](pkgs/bay/app/managers/sandbox/sandbox.py:211) 中的 `await self._db.rollback()` 是一个非常规的并发控制方式，需要验证其正确性
+**已解决**:
+- [x] 锁逻辑从 SandboxManager 抽离到独立模块
+- [x] 提供 `cleanup_deleted_sandbox_locks()` 清理已删除 sandbox 的锁
+- [x] SQLite stale read 问题已修复（`fix(bay): resolve SQLite stale read issues`）
 
-**轻量化建议**:
-- 单实例部署：当前方案足够，只需添加锁过期清理
-- 多实例部署：用数据库 `version` 字段做乐观锁（已有），无需引入 Redis
+**待改进**:
+- [ ] 多实例部署仍需依赖数据库乐观锁
+- [ ] 锁超时机制（避免死锁）
 
 ---
 
-### 2. 路径安全校验（Bay 侧缺失）
+### 2. ✅ 路径安全校验（已实现）
 
-**文件**: [`pkgs/ship/app/workspace.py`](pkgs/ship/app/workspace.py:26)
+**文件**: [`pkgs/bay/app/validators/path.py`](pkgs/bay/app/validators/path.py)
 
-**当前状态**: Ship 侧已实现 `resolve_path()` 做路径穿越防护，但 Bay 侧未验证。
+**当前状态**: Bay 侧已实现完整的路径校验，与 Ship 形成双层防护。
 
-**审查要点**:
-- [ ] Bay 的 Capability API 直接将路径透传给 Ship，未做预校验
-- [ ] 如果恶意用户发送 `../../../etc/passwd`，依赖 Ship 拦截是否足够安全？
-- [ ] Bay 应该在转发前做一层校验（防御纵深）
+```python
+def validate_relative_path(path: str) -> str:
+    """校验相对路径，拒绝绝对路径和目录穿越"""
 
-**文件需审查**:
-- [`pkgs/bay/app/adapters/ship.py`](pkgs/bay/app/adapters/ship.py:203) - `read_file`, `write_file` 等方法
-- [`pkgs/bay/app/router/capability/capability.py`](pkgs/bay/app/router/capability/capability.py)
+def validate_optional_relative_path(path: str | None) -> str | None:
+    """可选路径校验"""
+```
+
+**已解决**:
+- [x] Bay 侧路径校验实现（禁止绝对路径、目录穿越）
+- [x] 与 Ship `resolve_path` 对齐
+- [x] 单元测试覆盖 (`test_path_validator.py`)
+- [x] E2E 测试覆盖 (`test_path_security.py`)
 
 ---
 
@@ -328,20 +335,38 @@ def _sandbox_to_response(sandbox, current_session=None) -> SandboxResponse:
 
 ## 📋 架构层面审查
 
-### 16. GC 机制未实现
+### 16. ✅ GC 机制（已实现）
 
-**状态**: TODO 中标记为 🔴 高优先级，但代码中尚未实现
+**状态**: 已完整实现后台 GC 调度器和各类回收任务
 
-**审查要点**:
-- [ ] Idle Session 回收逻辑缺失
-- [ ] 过期 Sandbox 清理逻辑缺失
-- [ ] 孤儿容器检测缺失
-- [ ] 需要后台任务调度器
+**文件**: [`pkgs/bay/app/services/gc/`](pkgs/bay/app/services/gc/)
 
-**轻量化建议**:
-- 使用 FastAPI 的 `BackgroundTasks` 或简单的 `asyncio.create_task` 定时循环
-- 避免引入 Celery/APScheduler 等重型任务队列
-- 单实例部署下，一个简单的 `while True: await asyncio.sleep(60)` 循环就够了
+```
+pkgs/bay/app/services/gc/
+├── scheduler.py          # GCScheduler - 后台调度器
+├── coordinator.py        # GC 协调器
+├── lifecycle.py          # GC 生命周期管理
+├── base.py               # GCTask 基类
+└── tasks/
+    ├── idle_session.py       # IdleSessionGC
+    ├── expired_sandbox.py    # ExpiredSandboxGC
+    ├── orphan_workspace.py   # OrphanWorkspaceGC
+    └── orphan_container.py   # OrphanContainerGC
+```
+
+**已解决**:
+- [x] **IdleSessionGC**：空闲 Session 回收（idle_expires_at 过期）
+- [x] **ExpiredSandboxGC**：过期 Sandbox 清理（expires_at 过期）
+- [x] **OrphanWorkspaceGC**：孤儿 managed workspace 清理
+- [x] **OrphanContainerGC**：孤儿容器检测与清理
+- [x] GC 调度器框架（GCTask + GCScheduler）
+- [x] 配置化 GC 间隔与开关
+- [x] Admin API 支持手动触发 GC（用于测试）
+- [x] 单元测试 (`test_gc_scheduler.py`, `test_gc_tasks.py`)
+- [x] E2E 测试 (`test_gc_e2e.py`, `test_gc_workflow_scenario.py`)
+
+**待完成**:
+- [ ] 启动时 reconcile（对账孤儿资源）
 
 ---
 
@@ -465,10 +490,14 @@ def _sandbox_to_response(sandbox, current_session=None) -> SandboxResponse:
 
 1. **数据模型设计**: Sandbox/Session/Workspace 分离清晰，`desired_state` vs `observed_state` 是正确的模式
 2. **幂等性支持**: Idempotency-Key 机制完整
-3. **路径隔离**: Ship 侧的 `resolve_path()` 实现正确
+3. **路径隔离**: Ship 侧的 `resolve_path()` 实现正确，**Bay 侧也已实现双层防护**
 4. **Profile 抽象**: 运行时规格枚举化，避免无限自定义
 5. **Adapter 模式**: ShipAdapter 为未来多运行时扩展留出了接口
 6. **轻量化架构**: 仅依赖 FastAPI + SQLite + Docker，无 Redis/etcd/消息队列，部署简单
+7. **GC 机制**: 完整实现后台调度器 + 四种 GC 任务（Idle Session / Expired Sandbox / Orphan Workspace / Orphan Container）
+8. **Extend TTL**: 支持延长 Sandbox TTL，带幂等性保护
+9. **并发锁模块**: 独立的锁管理模块，支持锁清理
+10. **测试覆盖**: 并行测试支持（pytest-xdist），E2E 场景丰富
 
 ---
 
@@ -494,13 +523,28 @@ def _sandbox_to_response(sandbox, current_session=None) -> SandboxResponse:
 
 | 优先级 | 项目数 | 关键问题 |
 |:---:|:---:|:---|
-| 🔴 高 | 5 | 并发锁、路径安全、资源泄露、时间竞态、连接管理 |
+| 🔴 高 | 3 | ~~并发锁~~ ✅、~~路径安全~~ ✅、资源泄露、时间竞态、连接管理 |
 | 🟠 中 | 5 | 命令注入、内存泄露、配置缓存、事务边界、查找效率 |
 | 🟡 低 | 5 | 命名冲突、日志完整性、硬编码、类型注解、测试覆盖 |
-| 📋 架构 | 3 | GC机制、可观测性、数据迁移 |
+| 📋 架构 | 2 | ~~GC机制~~ ✅、可观测性、数据迁移 |
+
+### 进度统计
+
+- **已解决**: 3 项（并发锁改进、路径安全、GC 机制）
+- **待解决**: 12 项
+- **进行中**: 0 项
 
 ---
 
 > **下一步**: 按优先级逐项解决，每项完成后在此文档标记 ✅
 >
 > **注意**: 所有修复方案应优先选择不引入新依赖的实现方式
+
+---
+
+## 📝 变更历史
+
+| 日期 | 变更内容 |
+|:---|:---|
+| 2026-02-02 | 更新 GC 机制为已完成；更新路径安全为已完成；更新并发锁为已改进；新增已做得好的部分 |
+| 2026-01-31 | 初始版本 |
