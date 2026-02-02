@@ -90,7 +90,7 @@ class TestSandboxManagerCreate:
     Purpose: Verify sandbox creation also creates managed cargo correctly.
     """
 
-    async def test_create_sandbox_creates_managed_workspace(
+    async def test_create_sandbox_creates_managed_cargo(
         self,
         sandbox_manager: SandboxManager,
         fake_driver: FakeDriver,
@@ -359,12 +359,12 @@ class TestSandboxManagerDelete:
             select(Cargo).where(Cargo.id == cargo_id)
         )
         cargo = result.scalars().first()
-        volume_name = workspace.driver_ref
+        volume_name = cargo.driver_ref
         
         # Act
         await sandbox_manager.delete(sandbox)
 
-        # Assert - workspace record deleted
+        # Assert - cargo record deleted
         result = await db_session.execute(
             select(Cargo).where(Cargo.id == cargo_id)
         )
@@ -518,7 +518,6 @@ class TestRuntimeTypeFromProfile:
             image="bay-browser:latest",
         )
         assert profile.runtime_type == "browser"
-
 
 # Note: ensure_running tests require real runtime health checks,
 # so they are in integration tests instead of unit tests.
