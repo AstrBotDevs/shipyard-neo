@@ -20,7 +20,7 @@ from app.config import ProfileConfig, get_settings
 from app.drivers.base import ContainerStatus, Driver
 from app.errors import NotFoundError, SessionNotReadyError
 from app.models.session import Session, SessionStatus
-from app.models.workspace import Workspace
+from app.models.cargo import Cargo
 
 logger = structlog.get_logger()
 
@@ -41,14 +41,14 @@ class SessionManager:
     async def create(
         self,
         sandbox_id: str,
-        workspace: Workspace,
+        workspace: Cargo,
         profile: ProfileConfig,
     ) -> Session:
         """Create a new session record (does not start container).
         
         Args:
             sandbox_id: Sandbox ID
-            workspace: Workspace to mount
+            workspace: Cargo to mount
             profile: Profile configuration
             
         Returns:
@@ -88,7 +88,7 @@ class SessionManager:
     async def ensure_running(
         self,
         session: Session,
-        workspace: Workspace,
+        workspace: Cargo,
         profile: ProfileConfig,
     ) -> Session:
         """Ensure session is running - create/start container if needed.
@@ -97,7 +97,7 @@ class SessionManager:
         
         Args:
             session: Session to ensure is running
-            workspace: Workspace to mount
+            workspace: Cargo to mount
             profile: Profile configuration
             
         Returns:
