@@ -21,6 +21,7 @@ from app.errors import CapabilityNotSupportedError, SessionNotReadyError
 from app.managers.sandbox import SandboxManager
 from app.models.sandbox import Sandbox
 from app.models.session import Session
+from app.router.capability.adapter_pool import AdapterPool, default_adapter_pool
 
 logger = structlog.get_logger()
 
@@ -28,11 +29,15 @@ logger = structlog.get_logger()
 class CapabilityRouter:
     """Routes capability requests to the appropriate runtime adapter."""
 
-    def __init__(self, sandbox_mgr: SandboxManager) -> None:
+    def __init__(
+        self,
+        sandbox_mgr: SandboxManager,
+        *,
+        adapter_pool: AdapterPool[BaseAdapter] | None = None,
+    ) -> None:
         self._sandbox_mgr = sandbox_mgr
         self._log = logger.bind(component="capability_router")
-        # Cache of adapters by endpoint
-        self._adapters: dict[str, BaseAdapter] = {}
+        self._adapter_pool = default_adapter_pool if adapter_pool is None else adapter_pool
 
     async def ensure_session(self, sandbox: Sandbox) -> Session:
         """Ensure sandbox has a running session.
@@ -59,14 +64,14 @@ class CapabilityRouter:
                 sandbox_id=session.sandbox_id,
             )
 
-        if session.endpoint not in self._adapters:
-            # Create adapter based on runtime type
-            if session.runtime_type == "ship":
-                self._adapters[session.endpoint] = ShipAdapter(session.endpoint)
-            else:
-                raise ValueError(f"Unknown runtime type: {session.runtime_type}")
+        endpoint = session.endpoint
 
-        return self._adapters[session.endpoint]
+        def factory() -> BaseAdapter:
+            if session.runtime_type == "ship":
+                return ShipAdapter(endpoint)
+            raise ValueError(f"Unknown runtime type: {session.runtime_type}")
+
+        return self._adapter_pool.get_or_create(endpoint, factory)
 
     async def _require_capability(self, adapter: BaseAdapter, capability: str) -> None:
         """Fail-fast if runtime does not declare the requested capability.

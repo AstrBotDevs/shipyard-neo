@@ -170,12 +170,18 @@ class TestCapabilityRouterGetAdapter:
         """Create mock sandbox manager."""
         return AsyncMock()
 
-    def test_get_adapter_no_endpoint_raises(self, mock_sandbox_mgr):
+    @pytest.fixture
+    def adapter_pool(self):
+        from app.router.capability.adapter_pool import AdapterPool
+
+        return AdapterPool(max_size=16, ttl_seconds=60.0)
+
+    def test_get_adapter_no_endpoint_raises(self, mock_sandbox_mgr, adapter_pool):
         """_get_adapter should raise when session has no endpoint."""
         from app.errors import SessionNotReadyError
         from app.models.session import Session
 
-        router = CapabilityRouter(mock_sandbox_mgr)
+        router = CapabilityRouter(mock_sandbox_mgr, adapter_pool=adapter_pool)
 
         session = MagicMock(spec=Session)
         session.endpoint = None
@@ -186,11 +192,11 @@ class TestCapabilityRouterGetAdapter:
 
         assert "no endpoint" in exc_info.value.message.lower()
 
-    def test_get_adapter_unknown_runtime_type_raises(self, mock_sandbox_mgr):
+    def test_get_adapter_unknown_runtime_type_raises(self, mock_sandbox_mgr, adapter_pool):
         """_get_adapter should raise for unknown runtime types."""
         from app.models.session import Session
 
-        router = CapabilityRouter(mock_sandbox_mgr)
+        router = CapabilityRouter(mock_sandbox_mgr, adapter_pool=adapter_pool)
 
         session = MagicMock(spec=Session)
         session.endpoint = "http://localhost:8123"
@@ -201,11 +207,11 @@ class TestCapabilityRouterGetAdapter:
 
         assert "Unknown runtime type" in str(exc_info.value)
 
-    def test_get_adapter_caches_by_endpoint(self, mock_sandbox_mgr):
-        """_get_adapter should cache adapters by endpoint."""
+    def test_get_adapter_caches_by_endpoint(self, mock_sandbox_mgr, adapter_pool):
+        """_get_adapter should cache adapters by endpoint (pool hit)."""
         from app.models.session import Session
 
-        router = CapabilityRouter(mock_sandbox_mgr)
+        router = CapabilityRouter(mock_sandbox_mgr, adapter_pool=adapter_pool)
 
         session = MagicMock(spec=Session)
         session.endpoint = "http://localhost:8123"
@@ -215,3 +221,60 @@ class TestCapabilityRouterGetAdapter:
         adapter2 = router._get_adapter(session)
 
         assert adapter1 is adapter2
+
+    def test_get_adapter_reuses_across_router_instances(self, mock_sandbox_mgr, adapter_pool):
+        """Adapters should be reused across CapabilityRouter instances."""
+        from app.models.session import Session
+
+        router1 = CapabilityRouter(mock_sandbox_mgr, adapter_pool=adapter_pool)
+        router2 = CapabilityRouter(mock_sandbox_mgr, adapter_pool=adapter_pool)
+
+        session = MagicMock(spec=Session)
+        session.endpoint = "http://localhost:8123"
+        session.runtime_type = "ship"
+
+        adapter1 = router1._get_adapter(session)
+        adapter2 = router2._get_adapter(session)
+
+        assert adapter1 is adapter2
+
+    def test_get_adapter_pool_eviction_by_capacity(self, mock_sandbox_mgr):
+        """Pool should evict least-recently-used adapters when over capacity."""
+        from app.models.session import Session
+        from app.router.capability.adapter_pool import AdapterPool
+
+        pool = AdapterPool(max_size=1, ttl_seconds=60.0)
+        router = CapabilityRouter(mock_sandbox_mgr, adapter_pool=pool)
+
+        session1 = MagicMock(spec=Session)
+        session1.endpoint = "http://localhost:8123"
+        session1.runtime_type = "ship"
+
+        session2 = MagicMock(spec=Session)
+        session2.endpoint = "http://localhost:9000"
+        session2.runtime_type = "ship"
+
+        adapter1 = router._get_adapter(session1)
+        _adapter2 = router._get_adapter(session2)
+
+        adapter1_new = router._get_adapter(session1)
+        assert adapter1_new is not adapter1
+
+    def test_get_adapter_pool_eviction_by_ttl(self, mock_sandbox_mgr):
+        """Pool should recreate adapters after TTL expiry."""
+        from app.models.session import Session
+        from app.router.capability.adapter_pool import AdapterPool
+
+        now = {"t": 0.0}
+        pool = AdapterPool(max_size=8, ttl_seconds=1.0, now=lambda: now["t"])
+        router = CapabilityRouter(mock_sandbox_mgr, adapter_pool=pool)
+
+        session = MagicMock(spec=Session)
+        session.endpoint = "http://localhost:8123"
+        session.runtime_type = "ship"
+
+        adapter1 = router._get_adapter(session)
+        now["t"] = 2.0
+        adapter2 = router._get_adapter(session)
+
+        assert adapter2 is not adapter1
