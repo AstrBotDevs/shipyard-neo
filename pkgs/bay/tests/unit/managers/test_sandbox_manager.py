@@ -176,7 +176,7 @@ class TestSandboxManagerCreate:
         )
 
         # Assert
-        status = sandbox.compute_status(current_session=None)
+        status = sandbox.compute_status(now=datetime.utcnow(), current_session=None)
         assert status == SandboxStatus.IDLE
 
 
@@ -224,6 +224,64 @@ class TestSandboxManagerStop:
         # Assert
         assert sandbox.current_session_id is None
         assert sandbox.idle_expires_at is None
+
+
+class TestSandboxManagerList:
+    """Unit-03: SandboxManager.list tests."""
+
+    async def test_list_returns_computed_status_and_applies_status_filter(
+        self,
+        sandbox_manager: SandboxManager,
+        db_session: AsyncSession,
+    ):
+        sandbox_idle = await sandbox_manager.create(owner="test-user")
+        sandbox_ready = await sandbox_manager.create(owner="test-user")
+
+        session = Session(
+            id="sess-ready-1",
+            sandbox_id=sandbox_ready.id,
+            runtime_type="ship",
+            profile_id="python-default",
+            container_id="fake-container-1",
+            endpoint="http://localhost:8123",
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.RUNNING,
+        )
+        db_session.add(session)
+        await db_session.commit()
+
+        sandbox_ready.current_session_id = session.id
+        await db_session.commit()
+
+        items, _next_cursor = await sandbox_manager.list(owner="test-user", limit=50)
+        status_by_id = {item.sandbox.id: item.status for item in items}
+
+        assert status_by_id[sandbox_idle.id] == SandboxStatus.IDLE
+        assert status_by_id[sandbox_ready.id] == SandboxStatus.READY
+
+        ready_only, _ = await sandbox_manager.list(
+            owner="test-user",
+            status=SandboxStatus.READY,
+            limit=50,
+        )
+        assert [item.sandbox.id for item in ready_only] == [sandbox_ready.id]
+
+    async def test_list_cursor_paginates_by_sandbox_id(
+        self,
+        sandbox_manager: SandboxManager,
+    ):
+        sandbox_a = await sandbox_manager.create(owner="test-user")
+        sandbox_b = await sandbox_manager.create(owner="test-user")
+
+        page1, cursor1 = await sandbox_manager.list(owner="test-user", limit=1)
+        assert len(page1) == 1
+        assert cursor1 == page1[0].sandbox.id
+
+        page2, cursor2 = await sandbox_manager.list(owner="test-user", limit=50, cursor=cursor1)
+        assert len(page2) == 1
+        assert cursor2 is None
+
+        assert {page1[0].sandbox.id, page2[0].sandbox.id} == {sandbox_a.id, sandbox_b.id}
 
     async def test_stop_calls_driver_stop(
         self,

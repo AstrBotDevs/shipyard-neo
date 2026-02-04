@@ -60,13 +60,30 @@ def _sandbox_to_response(
     sandbox: Sandbox, current_session: Session | None = None
 ) -> SandboxResponse:
     """Convert Sandbox model to API response."""
+    now = datetime.utcnow()
+    return _sandbox_to_response_at_time(
+        sandbox,
+        now=now,
+        current_session=current_session,
+    )
+
+
+def _sandbox_to_response_at_time(
+    sandbox,
+    *,
+    now: datetime,
+    current_session=None,
+    status: SandboxStatus | None = None,
+) -> SandboxResponse:
+    """Convert Sandbox model to API response using a fixed time reference."""
     settings = get_settings()
     profile = settings.get_profile(sandbox.profile_id)
     capabilities = profile.capabilities if profile else []
+    computed_status = status or sandbox.compute_status(now=now, current_session=current_session)
 
     return SandboxResponse(
         id=sandbox.id,
-        status=sandbox.compute_status(current_session).value,
+        status=computed_status.value,
         profile=sandbox.profile_id,
         cargo_id=sandbox.cargo_id,
         capabilities=capabilities,
@@ -161,7 +178,15 @@ async def list_sandboxes(
         cursor=cursor,
     )
 
-    items = [_sandbox_to_response(s) for s in sandboxes]
+    now = datetime.utcnow()
+    items = [
+        _sandbox_to_response_at_time(
+            item.sandbox,
+            now=now,
+            status=item.status,
+        )
+        for item in sandboxes
+    ]
     return SandboxListResponse(items=items, next_cursor=next_cursor)
 
 

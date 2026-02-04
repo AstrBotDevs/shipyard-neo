@@ -80,17 +80,23 @@ class Sandbox(SQLModel, table=True):
             return False
         return datetime.utcnow() > self.expires_at
 
-    def compute_status(self, current_session: "Optional[Session]" = None) -> SandboxStatus:
+    def compute_status(
+        self,
+        *,
+        now: datetime,
+        current_session: "Optional[Session]" = None,
+    ) -> SandboxStatus:
         """Compute aggregated status for external API.
 
         Args:
+            now: Fixed time reference for deterministic computation
             current_session: The current session object (if loaded)
         """
         from app.models.session import SessionStatus
 
         if self.deleted_at is not None:
             return SandboxStatus.DELETED
-        if self.is_expired:
+        if self.expires_at is not None and now > self.expires_at:
             return SandboxStatus.EXPIRED
 
         if current_session is None:

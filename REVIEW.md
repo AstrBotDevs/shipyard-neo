@@ -99,36 +99,25 @@ except Exception:
 
 ---
 
-### 4. ⏸️ 时间相关的竞态条件（暂不处理）
+### 4. ✅ 时间相关的竞态条件（已改进：status 计算固定 now）
 
-**文件**: [`pkgs/bay/app/models/sandbox.py`](pkgs/bay/app/models/sandbox.py:77)
+**文件**:
+- [`pkgs/bay/app/models/sandbox.py`](pkgs/bay/app/models/sandbox.py:77)
+- [`pkgs/bay/app/managers/sandbox/sandbox.py`](pkgs/bay/app/managers/sandbox/sandbox.py:145)
 
-**问题**: `is_expired` 属性每次调用都重新计算 `datetime.utcnow()`：
+**问题**: 同一请求内多次取 `utcnow()` 可能导致 `status` 判断不一致（尤其是 list/status/filter 路径）。
 
 ```python
-@property
-def is_expired(self) -> bool:
-    if self.expires_at is None:
-        return False
-    return datetime.utcnow() > self.expires_at  # 每次调用时间不同
+def compute_status(self, *, now: datetime, current_session: Session | None) -> SandboxStatus:
+    if self.expires_at is not None and now > self.expires_at:
+        return SandboxStatus.EXPIRED
+    ...
 ```
 
-**审查要点**:
-- [ ] 同一个请求处理流程中多次检查 `is_expired` 可能得到不同结果
-- [ ] [`compute_status()`](pkgs/bay/app/models/sandbox.py:83) 调用 `is_expired`，可能导致状态不一致
-- [ ] 考虑在请求上下文中固定时间基准
-
-**2026-02-05 分析结论：暂不处理**
-
-调用链分析：
-- `is_expired` 只在 `compute_status()` 内部调用
-- `compute_status()` 只在 `_sandbox_to_response()` 中调用（构造 API 响应）
-- 同一请求只调用一次 `compute_status()`，不存在多次检查不一致问题
-
-实际影响极低：
-- ✅ 只影响 API 返回的 `status` 字段展示，不影响业务逻辑
-- ✅ `extend_ttl()` 中的过期判断是独立计算的
-- ✅ GC 清理过期 sandbox 也是独立判断的
+**已解决**:
+- [x] `Sandbox.compute_status()` 使用外部传入的固定 `now`，不再内部调用 `utcnow()` 导致竞态
+- [x] `SandboxManager.list(..., status=...)` 按固定 `now` 计算 status 并正确应用 `status` 过滤
+- [x] 单元测试覆盖：`pkgs/bay/tests/unit/managers/test_sandbox_manager.py`
 
 ---
 

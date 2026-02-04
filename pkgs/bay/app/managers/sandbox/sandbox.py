@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
@@ -33,6 +34,11 @@ if TYPE_CHECKING:
     from app.drivers.base import Driver
 
 logger = structlog.get_logger()
+
+@dataclass(frozen=True, slots=True)
+class SandboxListItem:
+    sandbox: Sandbox
+    status: SandboxStatus
 
 
 class SandboxManager:
@@ -153,7 +159,7 @@ class SandboxManager:
         status: SandboxStatus | None = None,
         limit: int = 50,
         cursor: str | None = None,
-    ) -> tuple[list[Sandbox], str | None]:
+    ) -> tuple[list[SandboxListItem], str | None]:
         """List sandboxes for owner.
 
         Args:
@@ -165,25 +171,84 @@ class SandboxManager:
         Returns:
             Tuple of (sandboxes, next_cursor)
         """
-        query = select(Sandbox).where(
-            Sandbox.owner == owner,
-            Sandbox.deleted_at.is_(None),
-        )
+        now = datetime.utcnow()
+        scan_cursor = cursor
 
-        if cursor:
-            query = query.where(Sandbox.id > cursor)
+        # Limit per-call scanning so rare filters don't force unbounded work.
+        scan_batch_size = min(max(limit * 5, 50), 500)
+        max_scanned = max(limit * 20, 1000)
 
-        query = query.order_by(Sandbox.id).limit(limit + 1)
+        returned: list[SandboxListItem] = []
+        last_scanned_id: str | None = None
+        scanned = 0
 
-        result = await self._db.execute(query)
-        sandboxes = list(result.scalars().all())
+        while scanned < max_scanned:
+            query = select(Sandbox).where(
+                Sandbox.owner == owner,
+                Sandbox.deleted_at.is_(None),
+            )
 
-        next_cursor = None
-        if len(sandboxes) > limit:
-            sandboxes = sandboxes[:limit]
-            next_cursor = sandboxes[-1].id
+            if scan_cursor:
+                query = query.where(Sandbox.id > scan_cursor)
 
-        return sandboxes, next_cursor
+            query = query.order_by(Sandbox.id).limit(scan_batch_size)
+
+            result = await self._db.execute(query)
+            batch = list(result.scalars().all())
+            if not batch:
+                return returned, None
+
+            scanned += len(batch)
+            last_scanned_id = batch[-1].id
+
+            session_ids = [
+                sandbox.current_session_id
+                for sandbox in batch
+                if sandbox.current_session_id is not None
+            ]
+            sessions_by_id: dict[str, Session] = {}
+            if session_ids:
+                sessions_result = await self._db.execute(
+                    select(Session).where(Session.id.in_(session_ids))
+                )
+                sessions_by_id = {s.id: s for s in sessions_result.scalars().all()}
+
+            for sandbox in batch:
+                current_session = (
+                    sessions_by_id.get(sandbox.current_session_id)
+                    if sandbox.current_session_id is not None
+                    else None
+                )
+                computed_status = sandbox.compute_status(
+                    now=now,
+                    current_session=current_session,
+                )
+                if status is None or computed_status == status:
+                    returned.append(SandboxListItem(sandbox=sandbox, status=computed_status))
+                    if len(returned) >= limit:
+                        # Cursor is the last scanned sandbox_id at the point we reached the limit.
+                        next_cursor = sandbox.id
+                        # Match CargoManager cursor semantics: only return cursor if there may be more.
+                        has_more_result = await self._db.execute(
+                            select(Sandbox.id)
+                            .where(
+                                Sandbox.owner == owner,
+                                Sandbox.deleted_at.is_(None),
+                                Sandbox.id > next_cursor,
+                            )
+                            .order_by(Sandbox.id)
+                            .limit(1)
+                        )
+                        has_more = has_more_result.first() is not None
+                        return returned[:limit], next_cursor if has_more else None
+
+            scan_cursor = last_scanned_id
+            if len(batch) < scan_batch_size:
+                # Exhausted.
+                return returned, None
+
+        # Scanned limit reached; return what we found so far, plus a cursor to continue scanning.
+        return returned, last_scanned_id
 
     async def ensure_running(self, sandbox: Sandbox) -> Session:
         """Ensure sandbox has a running session.
