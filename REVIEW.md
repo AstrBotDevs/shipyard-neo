@@ -7,7 +7,7 @@
 > - **轻量化优先**：拒绝引入不必要的重型依赖，用最简单的方案解决实际问题
 > - "Theory loses. Every single time." — 解决真实问题，不做过度设计
 >
-> **最后更新**: 2026-02-02
+> **最后更新**: 2026-02-04
 
 ---
 
@@ -116,25 +116,29 @@ def is_expired(self) -> bool:
 
 ---
 
-### 5. httpx 客户端连接管理
+### 5. ✅ httpx 客户端连接管理（已实现连接池）
 
-**文件**: [`pkgs/bay/app/adapters/ship.py`](pkgs/bay/app/adapters/ship.py:64)
+**文件**:
+- [`pkgs/bay/app/services/http/client.py`](pkgs/bay/app/services/http/client.py)
+- [`pkgs/bay/app/main.py`](pkgs/bay/app/main.py)
+- [`pkgs/bay/app/adapters/ship.py`](pkgs/bay/app/adapters/ship.py)
+- [`pkgs/bay/app/managers/session/session.py`](pkgs/bay/app/managers/session/session.py)
 
-**问题**: 每次请求都创建新的 `AsyncClient`：
+**当前状态**: 已落地“共享 httpx.AsyncClient + FastAPI lifespan 管理”的轻量化方案。
 
 ```python
-async def _request(...):
-    async with httpx.AsyncClient() as client:  # 每次请求都新建
-        response = await client.request(...)
+# 共享连接池（示意）
+client = http_client_manager.client
+response = await client.request(...)
 ```
 
-**审查要点**:
-- [ ] 频繁创建/销毁连接，性能开销大
-- [ ] 无法复用 HTTP/2 连接
-- [ ] 应该使用连接池或单例客户端
-- [ ] [`_wait_for_ready()`](pkgs/bay/app/managers/session/session.py:206) 同样的问题
+**已解决**:
+- [x] `HTTPClientManager` 统一管理连接池与生命周期
+- [x] `ShipAdapter` 与 runtime `/health` readiness polling 复用共享 client（测试场景有 fallback）
+- [x] `trust_env=False`，避免环境代理导致 Docker 私网 IP 访问异常（例如返回 502）
 
-**轻量化建议**: 在 `ShipAdapter` 类中持有一个 `httpx.AsyncClient` 实例，在 `__init__` 或首次使用时创建。这是零成本优化，不引入任何新依赖。
+**待改进**:
+- [ ] 失败路径资源清理仍需补强（见第 3 条：启动失败容器可能成为孤儿）
 
 ---
 
@@ -220,9 +224,9 @@ async def delete(self, sandbox: Sandbox) -> None:
     sandbox.deleted_at = datetime.utcnow()
     await self._db.commit()  # commit 1
 
-    # 级联删除 workspace
-    if workspace and workspace.managed:
-        await self._workspace_mgr.delete(...)  # commit 2
+    # 级联删除 managed cargo
+    if cargo and cargo.managed:
+        await self._cargo_mgr.delete(...)  # commit 2
 ```
 
 **审查要点**:
@@ -268,7 +272,7 @@ class FileNotFoundError(BayError):  # 覆盖了 builtins.FileNotFoundError
 
 **审查要点**:
 - [ ] 可能导致 `except FileNotFoundError` 捕获错误的异常
-- [ ] 建议重命名为 `WorkspaceFileNotFoundError` 或类似
+- [ ] 建议重命名为 `CargoFileNotFoundError` 或类似
 
 ---
 
@@ -350,14 +354,14 @@ pkgs/bay/app/services/gc/
 └── tasks/
     ├── idle_session.py       # IdleSessionGC
     ├── expired_sandbox.py    # ExpiredSandboxGC
-    ├── orphan_workspace.py   # OrphanWorkspaceGC
+    ├── orphan_cargo.py       # OrphanCargoGC
     └── orphan_container.py   # OrphanContainerGC
 ```
 
 **已解决**:
 - [x] **IdleSessionGC**：空闲 Session 回收（idle_expires_at 过期）
 - [x] **ExpiredSandboxGC**：过期 Sandbox 清理（expires_at 过期）
-- [x] **OrphanWorkspaceGC**：孤儿 managed workspace 清理
+- [x] **OrphanCargoGC**：孤儿 managed cargo 清理
 - [x] **OrphanContainerGC**：孤儿容器检测与清理
 - [x] GC 调度器框架（GCTask + GCScheduler）
 - [x] 配置化 GC 间隔与开关
@@ -488,13 +492,13 @@ pkgs/bay/app/services/gc/
 
 ## ✅ 已做得较好的部分
 
-1. **数据模型设计**: Sandbox/Session/Workspace 分离清晰，`desired_state` vs `observed_state` 是正确的模式
+1. **数据模型设计**: Sandbox/Session/Cargo 分离清晰，`desired_state` vs `observed_state` 是正确的模式
 2. **幂等性支持**: Idempotency-Key 机制完整
 3. **路径隔离**: Ship 侧的 `resolve_path()` 实现正确，**Bay 侧也已实现双层防护**
 4. **Profile 抽象**: 运行时规格枚举化，避免无限自定义
 5. **Adapter 模式**: ShipAdapter 为未来多运行时扩展留出了接口
 6. **轻量化架构**: 仅依赖 FastAPI + SQLite + Docker，无 Redis/etcd/消息队列，部署简单
-7. **GC 机制**: 完整实现后台调度器 + 四种 GC 任务（Idle Session / Expired Sandbox / Orphan Workspace / Orphan Container）
+7. **GC 机制**: 完整实现后台调度器 + 四种 GC 任务（Idle Session / Expired Sandbox / Orphan Cargo / Orphan Container）
 8. **Extend TTL**: 支持延长 Sandbox TTL，带幂等性保护
 9. **并发锁模块**: 独立的锁管理模块，支持锁清理
 10. **测试覆盖**: 并行测试支持（pytest-xdist），E2E 场景丰富
