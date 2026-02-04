@@ -67,31 +67,35 @@ def validate_optional_relative_path(path: str | None) -> str | None:
 
 ---
 
-### 3. 异常处理与资源泄露
+### 3. ✅ 异常处理与资源泄露（已修复：Session 启动失败清理）
 
-**文件**: [`pkgs/bay/app/managers/session/session.py`](pkgs/bay/app/managers/session/session.py:128)
+**文件**: [`pkgs/bay/app/managers/session/session.py`](pkgs/bay/app/managers/session/session.py:110)
 
-**问题**: 容器创建后启动失败，容器未清理：
+**修复摘要**:
+- endpoint 只在 runtime `/health` readiness 成功后才落库
+- 失败路径 best-effort `driver.destroy(container_id)`，并清空 `container_id/endpoint` 后标记 `FAILED`
+- readiness timeout 的 `SessionNotReadyError.details["sandbox_id"]` 修正为真实 `sandbox_id`
 
 ```python
-# create container
-container_id = await self._driver.create(...)
-session.container_id = container_id
-await self._db.commit()
-
-# start container - 如果这里失败
+container_id = session.container_id or await self._driver.create(...)
 try:
-    endpoint = await self._driver.start(...)
-except Exception as e:
+    endpoint = await self._driver.start(container_id, runtime_port=...)
+    await self._wait_for_ready(endpoint, sandbox_id=session.sandbox_id, session_id=session.id)
+    session.endpoint = endpoint  # only after ready
+    session.observed_state = SessionStatus.RUNNING
+except Exception:
+    await self._driver.destroy(container_id)  # best-effort
+    session.container_id = None
+    session.endpoint = None
     session.observed_state = SessionStatus.FAILED
-    await self._db.commit()
-    raise  # 容器已创建但未清理！
+    raise
 ```
 
-**审查要点**:
-- [ ] 容器创建成功但启动失败时，容器会变成孤儿
-- [ ] 需要在 `ensure_running` 失败路径中清理容器
-- [ ] 考虑使用 `try/finally` 或事务性创建模式
+**已解决**:
+- [x] `driver.start`/readiness 失败时不会留下孤儿容器
+- [x] 不会持久化不可用的 `session.endpoint`（避免脏写）
+- [x] 错误元数据 `sandbox_id` 正确
+- [x] 单元测试覆盖：`pkgs/bay/tests/unit/managers/test_session_manager.py`
 
 ---
 
@@ -138,7 +142,7 @@ response = await client.request(...)
 - [x] `trust_env=False`，避免环境代理导致 Docker 私网 IP 访问异常（例如返回 502）
 
 **待改进**:
-- [ ] 失败路径资源清理仍需补强（见第 3 条：启动失败容器可能成为孤儿）
+- [x] 失败路径资源清理已补强（见第 3 条：Session 启动失败清理）
 
 ---
 

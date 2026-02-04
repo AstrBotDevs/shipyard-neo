@@ -131,28 +131,45 @@ class SessionManager:
             session.observed_state = SessionStatus.STARTING
             await self._db.commit()
 
-            # Create container
-            container_id = await self._driver.create(
-                session=session,
-                profile=profile,
-                cargo=cargo,
-            )
+            try:
+                # Create container
+                container_id = await self._driver.create(
+                    session=session,
+                    profile=profile,
+                    cargo=cargo,
+                )
+            except Exception as e:
+                self._log.error(
+                    "session.create_failed",
+                    session_id=session.id,
+                    error=str(e),
+                )
+                session.observed_state = SessionStatus.FAILED
+                session.last_observed_at = datetime.utcnow()
+                await self._db.commit()
+                raise
 
             session.container_id = container_id
             await self._db.commit()
 
         # Need to start container
         if session.observed_state != SessionStatus.RUNNING:
+            container_id = session.container_id
             try:
                 endpoint = await self._driver.start(
-                    session.container_id,
+                    container_id,
                     runtime_port=int(profile.runtime_port or 8000),
                 )
-                session.endpoint = endpoint
 
                 # Wait for Ship runtime to be ready before marking as RUNNING
-                await self._wait_for_ready(endpoint, session.id)
+                await self._wait_for_ready(
+                    endpoint,
+                    session_id=session.id,
+                    sandbox_id=session.sandbox_id,
+                )
 
+                # Only persist endpoint after readiness succeeds.
+                session.endpoint = endpoint
                 session.observed_state = SessionStatus.RUNNING
                 session.last_observed_at = datetime.utcnow()
                 await self._db.commit()
@@ -161,9 +178,24 @@ class SessionManager:
                 self._log.error(
                     "session.start_failed",
                     session_id=session.id,
+                    container_id=container_id,
                     error=str(e),
                 )
+                # Best-effort cleanup: destroy any created container and clear runtime fields.
+                if container_id is not None:
+                    try:
+                        await self._driver.destroy(container_id)
+                    except Exception as destroy_error:
+                        self._log.warning(
+                            "session.destroy_failed",
+                            session_id=session.id,
+                            container_id=container_id,
+                            error=str(destroy_error),
+                        )
+                session.container_id = None
+                session.endpoint = None
                 session.observed_state = SessionStatus.FAILED
+                session.last_observed_at = datetime.utcnow()
                 await self._db.commit()
                 raise
 
@@ -172,8 +204,9 @@ class SessionManager:
     async def _wait_for_ready(
         self,
         endpoint: str,
-        session_id: str,
         *,
+        session_id: str,
+        sandbox_id: str,
         max_wait_seconds: float = 120.0,
         initial_interval: float = 0.5,
         max_interval: float = 1.0,
@@ -187,6 +220,7 @@ class SessionManager:
         Args:
             endpoint: Ship endpoint URL
             session_id: Session ID for logging
+            sandbox_id: Sandbox ID for error metadata
             max_wait_seconds: Maximum total time to wait (default 120s for image pull)
             initial_interval: Initial retry interval in seconds
             max_interval: Maximum retry interval in seconds
@@ -218,7 +252,7 @@ class SessionManager:
                     # Fallback: create temporary client
                     async with httpx.AsyncClient(trust_env=False) as temp_client:
                         response = await temp_client.get(url, timeout=2.0)
-                
+
                 if response.status_code == 200:
                     elapsed = asyncio.get_event_loop().time() - start_time
                     self._log.info(
@@ -248,7 +282,7 @@ class SessionManager:
         )
         raise SessionNotReadyError(
             message="Runtime failed to become ready",
-            sandbox_id=session_id,
+            sandbox_id=sandbox_id,
             retry_after_ms=1000,
         )
 
