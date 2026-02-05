@@ -96,6 +96,9 @@ class SessionManager:
 
         This is the core idempotent startup logic.
 
+        Phase 1.5: Adds proactive health probing to detect dead containers
+        before they cause runtime errors.
+
         Args:
             session: Session to ensure is running
             cargo: Cargo to mount
@@ -113,7 +116,15 @@ class SessionManager:
             observed_state=session.observed_state,
         )
 
-        # Already running and ready
+        # Phase 1.5: Proactive health probing
+        # If DB says RUNNING but container might be dead, probe before trusting
+        if (
+            session.container_id is not None
+            and session.observed_state == SessionStatus.RUNNING
+        ):
+            session = await self._probe_and_recover_if_dead(session, cargo, profile)
+
+        # Already running and ready (after probe)
         if session.is_ready:
             return session
 
@@ -364,3 +375,81 @@ class SessionManager:
         if session:
             session.last_active_at = datetime.utcnow()
             await self._db.commit()
+
+    async def _probe_and_recover_if_dead(
+        self,
+        session: Session,
+        cargo: Cargo,
+        profile: ProfileConfig,
+    ) -> Session:
+        """Probe container health and recover if dead.
+
+        Phase 1.5: Proactive health probing to detect dead containers.
+
+        This method is called when DB says RUNNING but we need to verify
+        the container is actually alive before trusting that state.
+
+        Args:
+            session: Session to probe
+            cargo: Cargo for potential rebuild
+            profile: Profile for potential rebuild
+
+        Returns:
+            Session (possibly with cleared container_id if dead)
+        """
+        container_id = session.container_id
+        if container_id is None:
+            return session
+
+        try:
+            info = await self._driver.status(
+                container_id,
+                runtime_port=int(profile.runtime_port or 8000),
+            )
+        except Exception as e:
+            # Docker daemon unreachable - degrade to old path (trust DB state)
+            self._log.warning(
+                "session.probe_failed",
+                session_id=session.id,
+                container_id=container_id,
+                error=str(e),
+            )
+            return session
+
+        # Container is healthy - nothing to do
+        if info.status == ContainerStatus.RUNNING:
+            return session
+
+        # Container is dead (EXITED/NOT_FOUND) - need recovery
+        self._log.warning(
+            "session.container_dead_detected",
+            session_id=session.id,
+            container_id=container_id,
+            container_status=info.status.value,
+        )
+
+        # Best-effort destroy (container may already be gone)
+        try:
+            await self._driver.destroy(container_id)
+        except Exception as destroy_error:
+            self._log.debug(
+                "session.destroy_dead_container_failed",
+                session_id=session.id,
+                container_id=container_id,
+                error=str(destroy_error),
+            )
+
+        # Clear runtime fields and reset to PENDING for rebuild
+        session.container_id = None
+        session.endpoint = None
+        session.observed_state = SessionStatus.PENDING
+        session.last_observed_at = datetime.utcnow()
+        await self._db.commit()
+
+        self._log.info(
+            "session.recovered_from_dead_container",
+            session_id=session.id,
+            old_container_id=container_id,
+        )
+
+        return session

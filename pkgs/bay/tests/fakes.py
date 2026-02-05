@@ -40,6 +40,11 @@ class FakeDriver(Driver):
     """Fake driver for unit testing.
 
     Records all method calls for assertion and provides controlled responses.
+
+    Phase 1.5 additions:
+    - status_calls: list of (container_id, runtime_port) for tracking probe calls
+    - status_override: optional callback to customize status() behavior
+    - status_exception: optional exception to raise on status() calls
     """
 
     def __init__(self) -> None:
@@ -54,6 +59,34 @@ class FakeDriver(Driver):
         self.destroy_calls: list[str] = []
         self.create_volume_calls: list[dict[str, Any]] = []
         self.delete_volume_calls: list[str] = []
+
+        # Phase 1.5: status() tracking and customization
+        self.status_calls: list[dict[str, Any]] = []
+        self._status_override: dict[str, ContainerInfo] | None = None
+        self._status_exception: Exception | None = None
+
+    def set_status_override(self, container_id: str, info: ContainerInfo) -> None:
+        """Set a custom status response for a specific container.
+
+        Use this to simulate dead containers (EXITED/NOT_FOUND).
+        """
+        if self._status_override is None:
+            self._status_override = {}
+        self._status_override[container_id] = info
+
+    def clear_status_override(self, container_id: str | None = None) -> None:
+        """Clear status override(s)."""
+        if container_id is None:
+            self._status_override = None
+        elif self._status_override is not None:
+            self._status_override.pop(container_id, None)
+
+    def set_status_exception(self, exception: Exception | None) -> None:
+        """Set an exception to raise on all status() calls.
+
+        Use this to simulate Docker daemon unreachable.
+        """
+        self._status_exception = exception
 
     async def create(
         self,
@@ -116,7 +149,25 @@ class FakeDriver(Driver):
             del self._containers[container_id]
 
     async def status(self, container_id: str, *, runtime_port: int | None = None) -> ContainerInfo:
-        """Get fake container status."""
+        """Get fake container status.
+
+        Phase 1.5: Supports override and exception injection for testing probes.
+        """
+        # Track the call for assertions
+        self.status_calls.append({
+            "container_id": container_id,
+            "runtime_port": runtime_port,
+        })
+
+        # Check for exception injection (simulate Docker daemon unreachable)
+        if self._status_exception is not None:
+            raise self._status_exception
+
+        # Check for override (simulate dead container)
+        if self._status_override is not None and container_id in self._status_override:
+            return self._status_override[container_id]
+
+        # Default behavior: return actual fake container state
         if container_id not in self._containers:
             return ContainerInfo(
                 container_id=container_id,

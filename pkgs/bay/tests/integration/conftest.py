@@ -88,6 +88,11 @@ SERIAL_GROUPS = {
         r"test_project_init\.py::",
         r"test_serverless_execution\.py::",
     ],
+    # Resilience tests - Phase 1.5: GC race condition tests need serial execution
+    # to avoid interference with other tests that might trigger GC
+    "resilience": [
+        r"resilience/test_gc_race_condition\.py::",
+    ],
 }
 
 _COMPILED_GROUPS: dict[str, list[re.Pattern]] = {
