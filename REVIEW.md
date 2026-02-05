@@ -7,7 +7,7 @@
 > - **轻量化优先**：拒绝引入不必要的重型依赖，用最简单的方案解决实际问题
 > - "Theory loses. Every single time." — 解决真实问题，不做过度设计
 >
-> **最后更新**: 2026-02-04
+> **最后更新**: 2026-02-05
 
 ---
 
@@ -99,7 +99,7 @@ except Exception:
 
 ---
 
-### 4. 时间相关的竞态条件
+### 4. ⏸️ 时间相关的竞态条件（暂不处理）
 
 **文件**: [`pkgs/bay/app/models/sandbox.py`](pkgs/bay/app/models/sandbox.py:77)
 
@@ -117,6 +117,18 @@ def is_expired(self) -> bool:
 - [ ] 同一个请求处理流程中多次检查 `is_expired` 可能得到不同结果
 - [ ] [`compute_status()`](pkgs/bay/app/models/sandbox.py:83) 调用 `is_expired`，可能导致状态不一致
 - [ ] 考虑在请求上下文中固定时间基准
+
+**2026-02-05 分析结论：暂不处理**
+
+调用链分析：
+- `is_expired` 只在 `compute_status()` 内部调用
+- `compute_status()` 只在 `_sandbox_to_response()` 中调用（构造 API 响应）
+- 同一请求只调用一次 `compute_status()`，不存在多次检查不一致问题
+
+实际影响极低：
+- ✅ 只影响 API 返回的 `status` 字段展示，不影响业务逻辑
+- ✅ `extend_ttl()` 中的过期判断是独立计算的
+- ✅ GC 清理过期 sandbox 也是独立判断的
 
 ---
 
@@ -169,7 +181,7 @@ sudo_args.extend([
 
 ---
 
-### 7. 后台进程内存泄露
+### 7. 后台进程内存泄露（待修复）
 
 **文件**: [`pkgs/ship/app/components/user_manager.py`](pkgs/ship/app/components/user_manager.py:24)
 
@@ -185,14 +197,35 @@ _background_processes: Dict[str, "BackgroundProcessEntry"] = {}
 - [ ] `Process` 对象持有资源，可能导致内存泄露
 - [ ] 需要添加清理机制（定时清理已完成进程）
 
-**轻量化建议**: 
+**轻量化建议**:
 - 在 `get_background_processes()` 调用时顺便清理 `returncode is not None` 的条目
 - 或设置最大条目数限制，FIFO 淘汰老条目
 - 无需引入后台定时任务框架
 
+**2026-02-05 分析结论：需要修复**
+
+问题确认：
+- 只有 `register_background_process()` 添加条目
+- `get_background_processes()` 和 `get_background_process()` 只读取，不清理
+- **无兜底机制**：容器重启会清空，但长期运行的容器会持续累积
+
+修复方案：
+```python
+def get_background_processes() -> List[Dict]:
+    """获取所有后台进程，同时清理已完成的条目"""
+    # 清理已完成进程
+    completed = [pid for pid, entry in _background_processes.items()
+                 if entry.process.returncode is not None]
+    for pid in completed:
+        del _background_processes[pid]
+    
+    # 返回当前进程列表
+    return [...]
+```
+
 ---
 
-### 8. 配置热加载与缓存
+### 8. ⏸️ 配置热加载与缓存（暂不处理）
 
 **文件**: [`pkgs/bay/app/config.py`](pkgs/bay/app/config.py:221)
 
@@ -210,9 +243,17 @@ def get_settings() -> Settings:
 - [ ] 是否需要支持配置热更新？
 - [ ] 考虑使用依赖注入而非全局单例
 
+**2026-02-05 分析结论：暂不处理**
+
+这是**设计意图**，不是问题：
+- ✅ 配置应在启动时加载，运行时保持不变
+- ✅ 需要更改配置时重启服务即可
+- ✅ 测试场景可用 `get_settings.cache_clear()` 清除
+- ✅ 除非有明确的热加载需求（目前没有）
+
 ---
 
-### 9. 数据库事务边界
+### 9. ⏸️ 数据库事务边界（暂不处理）
 
 **文件**: [`pkgs/bay/app/managers/sandbox/sandbox.py`](pkgs/bay/app/managers/sandbox/sandbox.py:381)
 
@@ -237,6 +278,19 @@ async def delete(self, sandbox: Sandbox) -> None:
 - [ ] 如果中途失败，会留下部分删除的状态
 - [ ] 应该使用单一事务包裹整个删除操作
 - [ ] 或者改用最终一致性 + 重试机制
+
+**2026-02-05 分析结论：暂不处理**
+
+当前设计是合理的：
+- `session.destroy()` 涉及容器销毁（外部操作），不应包含在数据库事务中
+- `cargo.delete()` 涉及文件系统删除（外部操作），也不应包含在事务中
+- 最终一致性 + GC 兜底是合理的架构选择
+
+兜底机制已存在：
+- ✅ 使用了锁保护，降低并发问题
+- ✅ `OrphanContainerGC` 会最终清理孤儿容器
+- ✅ `OrphanCargoGC` 会最终清理孤儿 cargo
+- ✅ 软删除模式允许后续补偿
 
 ---
 
@@ -538,13 +592,14 @@ pkgs/bay/app/services/gc/
 
 ### 进度统计
 
-- **已解决**: 3 项（并发锁改进、路径安全、GC 机制）
-- **待解决**: 12 项
-- **进行中**: 0 项
+- **已解决**: 5 项（并发锁改进、路径安全、GC 机制、httpx 连接管理、Session 启动失败清理）
+- **暂不处理**: 3 项（时间竞态条件、配置热加载、数据库事务边界）
+- **待修复**: 1 项（后台进程内存泄露）
+- **待评估**: 9 项
 
 ---
 
-> **下一步**: 按优先级逐项解决，每项完成后在此文档标记 ✅
+> **下一步**: 修复 #7 后台进程内存泄露，然后按优先级逐项解决
 >
 > **注意**: 所有修复方案应优先选择不引入新依赖的实现方式
 
@@ -554,5 +609,6 @@ pkgs/bay/app/services/gc/
 
 | 日期 | 变更内容 |
 |:---|:---|
+| 2026-02-05 | 分析 #4/#7/#8/#9：时间竞态条件暂不处理、后台进程内存泄露需修复、配置热加载暂不处理、事务边界暂不处理 |
 | 2026-02-02 | 更新 GC 机制为已完成；更新路径安全为已完成；更新并发锁为已改进；新增已做得好的部分 |
 | 2026-01-31 | 初始版本 |
