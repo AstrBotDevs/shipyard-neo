@@ -181,9 +181,9 @@ sudo_args.extend([
 
 ---
 
-### 7. 后台进程内存泄露（待修复）
+### 7. ✅ 后台进程内存泄露（已修复）
 
-**文件**: [`pkgs/ship/app/components/user_manager.py`](pkgs/ship/app/components/user_manager.py:24)
+**文件**: [`pkgs/ship/app/components/user_manager.py`](pkgs/ship/app/components/user_manager.py:90)
 
 **问题**: 后台进程注册表永远增长：
 
@@ -191,36 +191,29 @@ sudo_args.extend([
 _background_processes: Dict[str, "BackgroundProcessEntry"] = {}
 ```
 
-**审查要点**:
-- [ ] 进程完成后，`_background_processes` 中的条目从不删除
-- [ ] 长时间运行的 Ship 容器会累积大量僵尸条目
-- [ ] `Process` 对象持有资源，可能导致内存泄露
-- [ ] 需要添加清理机制（定时清理已完成进程）
+**已解决**:
+- [x] 进程完成后，条目会在 `get_background_processes()` 调用时自动清理
+- [x] 新增 `_cleanup_completed_processes()` 内部函数
+- [x] 清理策略：删除所有 `returncode is not None` 的条目
 
-**轻量化建议**:
-- 在 `get_background_processes()` 调用时顺便清理 `returncode is not None` 的条目
-- 或设置最大条目数限制，FIFO 淘汰老条目
-- 无需引入后台定时任务框架
-
-**2026-02-05 分析结论：需要修复**
-
-问题确认：
-- 只有 `register_background_process()` 添加条目
-- `get_background_processes()` 和 `get_background_process()` 只读取，不清理
-- **无兜底机制**：容器重启会清空，但长期运行的容器会持续累积
-
-修复方案：
+**修复代码** (2026-02-05):
 ```python
+def _cleanup_completed_processes() -> int:
+    """清理已完成的后台进程条目，返回清理数量。"""
+    completed_ids = [
+        process_id
+        for process_id, entry in _background_processes.items()
+        if entry.process.returncode is not None
+    ]
+    for process_id in completed_ids:
+        del _background_processes[process_id]
+    return len(completed_ids)
+
+
 def get_background_processes() -> List[Dict]:
-    """获取所有后台进程，同时清理已完成的条目"""
-    # 清理已完成进程
-    completed = [pid for pid, entry in _background_processes.items()
-                 if entry.process.returncode is not None]
-    for pid in completed:
-        del _background_processes[pid]
-    
-    # 返回当前进程列表
-    return [...]
+    """获取所有后台进程（自动清理已完成条目）"""
+    _cleanup_completed_processes()
+    # ... 返回进程列表
 ```
 
 ---
@@ -592,14 +585,13 @@ pkgs/bay/app/services/gc/
 
 ### 进度统计
 
-- **已解决**: 5 项（并发锁改进、路径安全、GC 机制、httpx 连接管理、Session 启动失败清理）
+- **已解决**: 6 项（并发锁改进、路径安全、GC 机制、httpx 连接管理、Session 启动失败清理、后台进程内存泄露）
 - **暂不处理**: 3 项（时间竞态条件、配置热加载、数据库事务边界）
-- **待修复**: 1 项（后台进程内存泄露）
 - **待评估**: 9 项
 
 ---
 
-> **下一步**: 修复 #7 后台进程内存泄露，然后按优先级逐项解决
+> **下一步**: 按优先级逐项解决，每项完成后在此文档标记 ✅
 >
 > **注意**: 所有修复方案应优先选择不引入新依赖的实现方式
 
@@ -609,6 +601,6 @@ pkgs/bay/app/services/gc/
 
 | 日期 | 变更内容 |
 |:---|:---|
-| 2026-02-05 | 分析 #4/#7/#8/#9：时间竞态条件暂不处理、后台进程内存泄露需修复、配置热加载暂不处理、事务边界暂不处理 |
+| 2026-02-05 | 分析 #4/#7/#8/#9：时间竞态条件暂不处理、**后台进程内存泄露已修复**、配置热加载暂不处理、事务边界暂不处理 |
 | 2026-02-02 | 更新 GC 机制为已完成；更新路径安全为已完成；更新并发锁为已改进；新增已做得好的部分 |
 | 2026-01-31 | 初始版本 |

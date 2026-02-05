@@ -87,8 +87,37 @@ def register_background_process(
     )
 
 
+def _cleanup_completed_processes() -> int:
+    """清理已完成的后台进程条目，返回清理数量。
+
+    内部函数，由 get_background_processes() 调用。
+    清理策略：删除所有 returncode is not None 的条目。
+    """
+    completed_ids = [
+        process_id
+        for process_id, entry in _background_processes.items()
+        if entry.process.returncode is not None
+    ]
+    for process_id in completed_ids:
+        del _background_processes[process_id]
+
+    if completed_ids:
+        logger.debug(
+            "Cleaned up %d completed background processes: %s",
+            len(completed_ids),
+            completed_ids,
+        )
+    return len(completed_ids)
+
+
 def get_background_processes() -> List[Dict]:
-    """获取所有后台进程"""
+    """获取所有后台进程。
+
+    注意：此函数会自动清理已完成的进程条目，防止内存泄露。
+    """
+    # 先清理已完成的进程
+    _cleanup_completed_processes()
+
     processes = []
     for entry in _background_processes.values():
         processes.append(

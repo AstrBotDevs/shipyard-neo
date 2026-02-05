@@ -59,6 +59,115 @@ class TestBackgroundProcessRegistry:
         # Clean up
         _background_processes.clear()
 
+    def test_cleanup_completed_processes(self):
+        """Test that completed processes are automatically cleaned up"""
+        from app.components.user_manager import (
+            register_background_process,
+            get_background_processes,
+            _background_processes,
+        )
+        
+        # Clear existing processes
+        _background_processes.clear()
+        
+        # Create mock processes: 2 running, 1 completed, 1 failed
+        running_process1 = MagicMock()
+        running_process1.returncode = None
+        running_process1.pid = 1001
+        
+        running_process2 = MagicMock()
+        running_process2.returncode = None
+        running_process2.pid = 1002
+        
+        completed_process = MagicMock()
+        completed_process.returncode = 0  # completed
+        completed_process.pid = 1003
+        
+        failed_process = MagicMock()
+        failed_process.returncode = 1  # failed
+        failed_process.pid = 1004
+        
+        register_background_process("running1", 1001, "sleep 100", running_process1)
+        register_background_process("running2", 1002, "sleep 200", running_process2)
+        register_background_process("completed", 1003, "echo done", completed_process)
+        register_background_process("failed", 1004, "false", failed_process)
+        
+        # Before cleanup, should have 4 entries
+        assert len(_background_processes) == 4
+        
+        # Call get_background_processes which triggers cleanup
+        processes = get_background_processes()
+        
+        # After cleanup, only 2 running processes should remain
+        assert len(processes) == 2
+        assert len(_background_processes) == 2
+        
+        # Verify only running processes remain
+        process_ids = [p["process_id"] for p in processes]
+        assert "running1" in process_ids
+        assert "running2" in process_ids
+        assert "completed" not in process_ids
+        assert "failed" not in process_ids
+        
+        # Clean up
+        _background_processes.clear()
+
+    def test_cleanup_all_completed(self):
+        """Test cleanup when all processes are completed"""
+        from app.components.user_manager import (
+            register_background_process,
+            get_background_processes,
+            _background_processes,
+        )
+        
+        # Clear existing processes
+        _background_processes.clear()
+        
+        # Create only completed processes
+        for i in range(3):
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.pid = 2000 + i
+            register_background_process(f"done{i}", 2000 + i, f"echo {i}", mock_process)
+        
+        # Before cleanup
+        assert len(_background_processes) == 3
+        
+        # Call get_background_processes which triggers cleanup
+        processes = get_background_processes()
+        
+        # All should be cleaned up
+        assert len(processes) == 0
+        assert len(_background_processes) == 0
+
+    def test_no_cleanup_when_all_running(self):
+        """Test no cleanup when all processes are still running"""
+        from app.components.user_manager import (
+            register_background_process,
+            get_background_processes,
+            _background_processes,
+        )
+        
+        # Clear existing processes
+        _background_processes.clear()
+        
+        # Create only running processes
+        for i in range(3):
+            mock_process = MagicMock()
+            mock_process.returncode = None  # still running
+            mock_process.pid = 3000 + i
+            register_background_process(f"run{i}", 3000 + i, f"sleep {i}", mock_process)
+        
+        # Call get_background_processes
+        processes = get_background_processes()
+        
+        # All should remain
+        assert len(processes) == 3
+        assert len(_background_processes) == 3
+        
+        # Clean up
+        _background_processes.clear()
+
 
 class TestProcessResult:
     """Test ProcessResult dataclass"""
