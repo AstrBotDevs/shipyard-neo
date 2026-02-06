@@ -10,7 +10,7 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 authors = [
-    { name = "Shipyard Team" },
+    { name = "AstrbotDevs Team" },
 ]
 keywords = ["mcp", "sandbox", "ai", "agent", "code-execution"]
 classifiers = [
