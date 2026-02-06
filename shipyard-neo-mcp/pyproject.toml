@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shipyard-neo-mcp"
+version = "0.1.0"
+description = "MCP Server for Shipyard Neo - Execute code in secure sandboxes"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [
+    { name = "Shipyard Team" },
+]
+keywords = ["mcp", "sandbox", "ai", "agent", "code-execution"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "shipyard-neo-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+shipyard-mcp = "shipyard_neo_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/shipyard-ai/shipyard-neo"
+Repository = "https://github.com/shipyard-ai/shipyard-neo"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shipyard_neo_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+]
