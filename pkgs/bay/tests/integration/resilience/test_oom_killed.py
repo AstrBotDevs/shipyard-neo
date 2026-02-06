@@ -45,7 +45,8 @@ async def _skip_if_oom_profile_missing():
         ) as client:
             resp = await client.get("/v1/profiles")
             if resp.status_code == 200:
-                profiles = resp.json()
+                data = resp.json()
+                profiles = data.get("items", [])
                 if not any(p.get("id") == OOM_TEST_PROFILE for p in profiles):
                     pytest.skip(f"OOM test profile '{OOM_TEST_PROFILE}' not found")
             else:
