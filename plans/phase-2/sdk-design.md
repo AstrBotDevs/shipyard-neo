@@ -25,7 +25,7 @@
 | 能力调用方式 | `ship.fs.*`, `ship.shell.*`, `ship.python.*` | `sandbox.filesystem.*`, `sandbox.shell.*`, `sandbox.python.*` |
 | TTL 管理 | `ttl` 参数 + `extend_ttl()` | `ttl` 参数 + `extend_ttl()` + `keepalive()` |
 | 资源规格 | `Spec(cpus, memory)` | `profile` 枚举（有限集合） |
-| Workspace | 不暴露 | 可选高级 API |
+| Cargo | 不暴露 | 可选高级 API |
 
 ## 2. 核心概念模型
 
@@ -34,10 +34,10 @@
 **BayClient（主入口）**
 - 属性：`endpoint_url`, `access_token`
 - 方法：`create_sandbox()`, `get_sandbox()`, `list_sandboxes()`
-- 子管理器：`workspaces: WorkspaceManager`
+- 子管理器：`cargos: CargoManager`
 
 **Sandbox（核心资源）**
-- 属性：`id`, `status`, `profile`, `workspace_id`, `capabilities`, `expires_at`, `idle_expires_at`
+- 属性：`id`, `status`, `profile`, `cargo_id`, `capabilities`, `expires_at`, `idle_expires_at`
 - 能力组件：`filesystem`, `shell`, `python`
 - 方法：`stop()`, `delete()`, `extend_ttl()`, `keepalive()`
 
@@ -50,12 +50,12 @@
 **PythonCapability（Python 能力）**
 - 方法：`exec()`
 
-**WorkspaceManager（Workspace 管理，高级 API）**
+**CargoManager（Cargo 管理，高级 API）**
 - 方法：`create()`, `get()`, `list()`, `delete()`
 
 **关系**：
 - BayClient 创建/管理 Sandbox
-- BayClient 通过 workspaces 属性访问 WorkspaceManager
+- BayClient 通过 cargos 属性访问 CargoManager
 - Sandbox 包含 filesystem、shell、python 三个能力组件
 
 ### 2.2 状态枚举
@@ -77,7 +77,7 @@ class SandboxStatus(str, Enum):
 |:--|:--|:--|
 | `client.create_sandbox()` | `POST /v1/sandboxes` | 创建 Sandbox |
 | `client.get_sandbox(id)` | `GET /v1/sandboxes/{id}` | 获取详情 |
-| `client.list_sandboxes()` | `GET /v1/sandboxes` | 列表查询 |
+| `client.list_sandboxes(limit, cursor, status)` | `GET /v1/sandboxes?limit=&cursor=&status=` | 分页列表查询，返回 `SandboxList(items, next_cursor)` |
 | `sandbox.stop()` | `POST /v1/sandboxes/{id}/stop` | 回收算力 |
 | `sandbox.delete()` | `DELETE /v1/sandboxes/{id}` | 彻底删除 |
 | `sandbox.extend_ttl(seconds)` | `POST /v1/sandboxes/{id}/extend_ttl` | 延长 TTL |
@@ -96,14 +96,19 @@ class SandboxStatus(str, Enum):
 | `sandbox.filesystem.upload(path, content)` | `POST /v1/sandboxes/{id}/filesystem/upload` | 上传 |
 | `sandbox.filesystem.download(path)` | `GET /v1/sandboxes/{id}/filesystem/download?path=...` | 下载 |
 
-### 3.3 Workspace 管理（高级 API）
+### 3.3 Cargo 管理（高级 API）
 
 | SDK 方法 | HTTP API | 说明 |
 |:--|:--|:--|
-| `client.workspaces.create()` | `POST /v1/workspaces` | 创建 external workspace |
-| `client.workspaces.get(id)` | `GET /v1/workspaces/{id}` | 获取详情 |
-| `client.workspaces.list()` | `GET /v1/workspaces` | 列表查询 |
-| `client.workspaces.delete(id)` | `DELETE /v1/workspaces/{id}` | 删除 |
+| `client.cargos.create()` | `POST /v1/cargos` | 创建 external cargo |
+| `client.cargos.get(id)` | `GET /v1/cargos/{id}` | 获取详情 |
+| `client.cargos.list(limit, cursor, managed)` | `GET /v1/cargos?limit=&cursor=&managed=` | 分页列表，默认仅返回 external（`managed=false`）|
+| `client.cargos.delete(id)` | `DELETE /v1/cargos/{id}` | 删除 |
+
+> **Cargo 列表默认行为**
+>
+> API 层默认只返回 external cargos（`managed=false`），符合"用户通常只关心自己显式创建的 cargo"的语义。
+> 若要查询 managed cargo，需显式传 `managed=True`。SDK 参数签名保持与 API 对齐，不做隐式展开。
 
 ## 4. 模块结构
 
@@ -115,7 +120,7 @@ pkgs/bay-sdk/
 │   ├── __init__.py           # 导出主要类
 │   ├── client.py             # BayClient 主入口
 │   ├── sandbox.py            # Sandbox 资源类
-│   ├── workspace.py          # Workspace 管理
+│   ├── cargo.py              # Cargo 管理
 │   ├── capabilities/
 │   │   ├── __init__.py
 │   │   ├── base.py           # BaseCapability
@@ -154,7 +159,7 @@ class SandboxStatus(str, Enum):
 class CreateSandboxRequest(BaseModel):
     """创建 Sandbox 请求"""
     profile: str = "python-default"
-    workspace_id: Optional[str] = None
+    cargo_id: Optional[str] = None
     ttl: Optional[int] = None  # null/0 = 不过期
 
 
@@ -163,7 +168,7 @@ class SandboxInfo(BaseModel):
     id: str
     status: SandboxStatus
     profile: str
-    workspace_id: str
+    cargo_id: str
     capabilities: list[str]
     created_at: datetime
     expires_at: Optional[datetime]
@@ -207,25 +212,48 @@ class FileInfo(BaseModel):
     is_dir: bool
     size: int
     modified_at: Optional[datetime] = None
+
+
+class SandboxList(BaseModel):
+    """Sandbox 列表分页结果
+
+    设计语义：
+    - SDK 仅做一次 HTTP 往返，返回当前页的 items 与下一页的 cursor。
+    - 不隐藏任何分页状态，用户可自行决定是否继续拉取。
+    - 与 REST API 直接一一对应，便于调试与学习。
+    - 若只需首页，不必引入迭代器/Pager 概念。
+
+    翻页示例：
+        cursor = None
+        while True:
+            page = await client.list_sandboxes(limit=50, cursor=cursor)
+            for sb in page.items:
+                process(sb)
+            if not page.next_cursor:
+                break
+            cursor = page.next_cursor
+    """
+    items: list[SandboxInfo]
+    next_cursor: Optional[str] = None
 ```
 
-### 5.2 Workspace 模型
+### 5.2 Cargo 模型
 
 ```python
-class WorkspaceInfo(BaseModel):
-    """Workspace 信息"""
+class CargoInfo(BaseModel):
+    """Cargo 信息"""
     id: str
     managed: bool
     managed_by_sandbox_id: Optional[str]
     backend: str
-    size_limit_mb: Optional[int]
+    size_limit_mb: int  # 总是有值（使用默认值或用户指定值）
     created_at: datetime
     last_accessed_at: datetime
 
 
-class CreateWorkspaceRequest(BaseModel):
-    """创建 Workspace 请求"""
-    size_limit_mb: Optional[int] = None
+class CreateCargoRequest(BaseModel):
+    """创建 Cargo 请求"""
+    size_limit_mb: Optional[int] = None  # 不指定则使用服务端默认值
 ```
 
 ## 6. 错误处理
@@ -259,6 +287,12 @@ class ForbiddenError(BayError):
     status_code = 403
 
 
+class QuotaExceededError(BayError):
+    """配额或速率限制 (429)"""
+    code = "quota_exceeded"
+    status_code = 429
+
+
 class ConflictError(BayError):
     """冲突 (409)"""
     code = "conflict"
@@ -277,31 +311,58 @@ class SessionNotReadyError(BayError):
     status_code = 503
 
 
-class TimeoutError(BayError):
-    """操作超时 (504)"""
+class RequestTimeoutError(BayError):
+    """操作超时 (504)
+    
+    Note: 避免与 Python 内置 TimeoutError 冲突
+    """
     code = "timeout"
     status_code = 504
 
 
-class RuntimeError(BayError):
-    """运行时错误 (502)"""
+class ShipError(BayError):
+    """运行时错误 (502)
+    
+    Note: 避免与 Python 内置 RuntimeError 冲突
+    """
     code = "ship_error"
     status_code = 502
 
 
-class SandboxExpiredError(ConflictError):
-    """Sandbox 已过期"""
+class SandboxExpiredError(BayError):
+    """Sandbox 已过期，无法续命 (409)"""
     code = "sandbox_expired"
+    status_code = 409
 
 
-class CapabilityNotSupportedError(ValidationError):
-    """能力不支持"""
+class SandboxTTLInfiniteError(BayError):
+    """Sandbox TTL 为无限，无需续命 (409)"""
+    code = "sandbox_ttl_infinite"
+    status_code = 409
+
+
+class CapabilityNotSupportedError(BayError):
+    """能力不支持 (400)"""
     code = "capability_not_supported"
+    status_code = 400
 
 
-class InvalidPathError(ValidationError):
-    """无效路径"""
+class InvalidPathError(BayError):
+    """无效路径 (400)"""
     code = "invalid_path"
+    status_code = 400
+
+
+class CargoFileNotFoundError(BayError):
+    """Sandbox workspace 中文件不存在 (404)
+    
+    实际语义：路径相对于 /workspace，不仅限于 Cargo 持久化场景，
+    任何相对路径找不到目标文件都会返回此错误码。
+    
+    Note: 避免与 Python 内置 FileNotFoundError 冲突
+    """
+    code = "file_not_found"
+    status_code = 404
 ```
 
 ### 6.2 错误映射
@@ -313,14 +374,17 @@ ERROR_CODE_MAP = {
     "not_found": NotFoundError,
     "unauthorized": UnauthorizedError,
     "forbidden": ForbiddenError,
+    "quota_exceeded": QuotaExceededError,
     "conflict": ConflictError,
     "validation_error": ValidationError,
     "session_not_ready": SessionNotReadyError,
-    "timeout": TimeoutError,
-    "ship_error": RuntimeError,
+    "timeout": RequestTimeoutError,
+    "ship_error": ShipError,
     "sandbox_expired": SandboxExpiredError,
+    "sandbox_ttl_infinite": SandboxTTLInfiniteError,
     "capability_not_supported": CapabilityNotSupportedError,
     "invalid_path": InvalidPathError,
+    "file_not_found": CargoFileNotFoundError,
 }
 ```
 
@@ -377,31 +441,31 @@ async def main():
 asyncio.run(main())
 ```
 
-### 7.2 使用 External Workspace
+### 7.2 使用 External Cargo
 
 ```python
-async def use_external_workspace():
+async def use_external_cargo():
     async with BayClient(endpoint_url="...", access_token="...") as client:
-        # 创建独立 Workspace
-        workspace = await client.workspaces.create(size_limit_mb=2048)
+        # 创建独立 Cargo
+        cargo = await client.cargos.create(size_limit_mb=2048)
         
-        # 创建 Sandbox 绑定此 Workspace
+        # 创建 Sandbox 绑定此 Cargo
         sandbox = await client.create_sandbox(
             profile="python-default",
-            workspace_id=workspace.id,
+            cargo_id=cargo.id,
             ttl=3600,
         )
         
         # 在 Sandbox 中写入数据
         await sandbox.filesystem.write_file("data.json", '{"key": "value"}')
         
-        # 删除 Sandbox（Workspace 不会被删除）
+        # 删除 Sandbox（Cargo 不会被删除）
         await sandbox.delete()
         
-        # 创建新 Sandbox 复用同一 Workspace
+        # 创建新 Sandbox 复用同一 Cargo
         sandbox2 = await client.create_sandbox(
             profile="python-default",
-            workspace_id=workspace.id,
+            cargo_id=cargo.id,
         )
         
         # 数据仍然存在
@@ -440,6 +504,13 @@ async def with_error_handling():
 ```
 
 ### 7.4 幂等性支持
+
+SDK 通过 `idempotency_key` 参数实现安全重试。该参数在请求时会作为 HTTP Header `Idempotency-Key` 发送。
+
+支持幂等键的操作：
+- `client.create_sandbox(idempotency_key=...)`
+- `client.cargos.create(idempotency_key=...)`
+- `sandbox.extend_ttl(seconds, idempotency_key=...)`
 
 ```python
 async def idempotent_creation():
@@ -523,11 +594,22 @@ result = sandbox.python.exec("print('hello')")
 
 ### 9.4 包名
 
-| 选项 | 说明 |
-|:--|:--|
-| A. `bay` | 简洁 |
-| B. `bay-sdk` | 明确是 SDK |
-| C. `shipyard-bay` | 保持 shipyard 前缀 |
+| 选项 | 分发名 (pip) | 导入名 (import) | 说明 |
+|:--|:--|:--|:--|
+| A. | `bay` | `bay` | 简洁，但与服务端 `pkgs/bay` 冲突 |
+| B. | `bay-sdk` | `bay_sdk` | 明确是 SDK，但与仓库隐含"bay"命名重复 |
+| C. | `shipyard-bay` | `shipyard_bay` | 保持 shipyard 前缀 |
+| **D. (推荐)** | `shipyard-neo-sdk` | `shipyard_neo` | 与仓库名对齐，清晰区分服务端和 SDK |
+
+决策：采用 **D. `shipyard-neo-sdk`**（分发名）/ `shipyard_neo`（导入名），原因如下：
+1. 与仓库名 `shipyard-neo` 保持一致，易于关联定位。
+2. 分发名与导入名遵循 PyPI 惯例（分发名可含 `-`，导入名改为 `_`）。
+3. 完全避免与服务端 `pkgs/bay` 在本地可编辑安装时发生 import 冲突。
+
+**导入示例（更新）**：
+```python
+from shipyard_neo import BayClient
+```
 
 ## 10. 实现计划
 
@@ -541,7 +623,7 @@ result = sandbox.python.exec("print('hello')")
 - [ ] 单元测试
 
 ### Phase 2: 增强功能
-- [ ] Workspace 管理 API
+- [ ] Cargo 管理 API
 - [ ] 同步包装器
 - [ ] 幂等性支持
 - [ ] 重试机制
@@ -772,8 +854,12 @@ async def devops_workflow():
 
 1. **停止后自动恢复**：`sandbox.stop()` 后再调用任何能力方法（如 `python.exec`），Bay 会自动 `ensure_running` 创建新 Session
 
-2. **变量丢失 vs 文件保留**：`stop()` 后 Python 变量丢失（新 Kernel），但 Workspace 文件保留
+2. **变量丢失 vs 文件保留**：`stop()` 后 Python 变量丢失（新 Kernel），但 Cargo 文件保留
 
 3. **TTL 过期不可复活**：一旦 `expires_at < now`，`extend_ttl()` 会抛出 `SandboxExpiredError`
 
 4. **路径校验在 SDK 层透传**：SDK 不做额外路径校验，依赖 Bay API 返回 `InvalidPathError`
+
+5. **keepalive 与算力拉起**：`sandbox.keepalive()` **仅续 idle 超时**，不会从 IDLE 态拉起新 Session；若需要触发算力，需调用能力方法（如 `python.exec()`），Bay 会自动 `ensure_running`
+
+6. **upload 底层为 multipart/form-data**：SDK 屏蔽此细节，用户传 `(path, content: bytes)` 即可，无需手动构造 multipart 请求
