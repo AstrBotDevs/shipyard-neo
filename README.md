@@ -19,15 +19,15 @@ Shipyard Neo 由控制面 **Bay** 和数据面 **Ship** 组成，通过标准 HT
 ```mermaid
 flowchart LR
     Client[AI Agent / SDK] --> Bay[Bay - Orchestrator]
-    
+
     subgraph Infrastructure
         Bay --> Driver[Driver Layer]
         Driver --> Ship[Ship Container - Runtime]
         Driver --> Cargo[(Cargo Volume)]
     end
-    
+
     Ship --> Cargo
-    
+
     style Bay fill:#2563eb,stroke:#fff,color:#fff
     style Ship fill:#16a34a,stroke:#fff,color:#fff
     style Cargo fill:#d97706,stroke:#fff,color:#fff
@@ -47,15 +47,19 @@ flowchart LR
 *   **真实 Shell 访问**：支持执行标准 Linux 命令，安装依赖，运行脚本。
 *   **文件系统控制**：完整的上传、下载、读写、列表和删除操作。
 *   **多租户隔离**：基于 Sandbox ID 的强逻辑隔离。
+*   **多驱动支持**：同时支持 Docker 和 Kubernetes 容器编排后端。
+*   **Python SDK**：类型安全的异步客户端库（`shipyard-neo-sdk`），开箱即用。
+*   **MCP 协议接入**：通过 MCP Server（`shipyard-neo-mcp`）让 AI Agent 原生调用沙箱能力。
+*   **容器健康探测**：主动检测死容器，避免请求挂起。
 *   **资源生命周期**：
     *   `TTL`：Sandbox 的存活周期。
     *   `Idle Timeout`：计算资源的空闲回收时间（省钱）。
 
 ## 📊 项目状态
 
-> **当前阶段**：Phase 1 核心功能基本完成，进入 P1 收尾阶段
+> **当前阶段**：Phase 2 核心功能推进中，K8s Driver / SDK / MCP Server 已完成
 
-### ✅ 已完成 (Phase 1 Core)
+### ✅ 已完成 (Phase 1 Core + Phase 2 部分)
 
 | 模块 | 状态 | 说明 |
 | :--- | :--- | :--- |
@@ -66,22 +70,20 @@ flowchart LR
 | 幂等 | ✅ 100% | Idempotency-Key 支持 |
 | Profile 能力检查 | ✅ 100% | 前置能力拦截 |
 | GC 机制 | ✅ 100% | Idle Session / Expired Sandbox / Orphan Cargo（Orphan Container 默认禁用） |
+| 路径安全校验 | ✅ 100% | Bay 侧路径校验 + Ship 双层防护 |
+| 容器健康探测 | ✅ 100% | 主动检测死容器，避免请求挂起 |
+| **K8s Driver** | ✅ 100% | Kubernetes 容器编排驱动（Pod + PVC + Pod IP 直连） |
+| **Python SDK** | ✅ 100% | `shipyard-neo-sdk`，完整 Sandbox/Cargo/Capability API |
+| **MCP Server** | ✅ 100% | `shipyard-neo-mcp`，AI Agent 沙箱执行的 MCP 协议接入 |
 
-### 🚧 进行中 (Phase 1 P1)
-
-| 模块 | 状态 | 说明 |
-| :--- | :--- | :--- |
-| 可观测性增强 | ⏳ Pending | request_id 有，metrics 未做 |
-
-### 📋 待办 (Phase 2+)
+### 🚧 进行中 / 待办
 
 | 模块 | 优先级 | 说明 |
 | :--- | :--- | :--- |
 | **Cargo API** | 🟠 中 | 对外暴露独立 Cargo 管理（目前仅 managed） |
-| **SDK 完善** | 🟠 中 | Python SDK 对接新 Bay API |
-| **MCP 协议层** | 🟡 中 | Ship 支持 MCP over SSE，LLM 原生工具发现 |
+| **可观测性增强** | 🟡 中 | request_id 有，Prometheus metrics 未做 |
+| **MCP 协议层（Ship 原生）** | 🟡 中 | Ship 支持 MCP over SSE，LLM 原生工具发现 |
 | **多容器支持** | 🟡 低 | Browser + Ship Sidecar 模式 |
-| **K8s Driver** | 🟡 低 | 生产级 Kubernetes 支持 |
 
 > 详细进度请参考 [`TODO.md`](TODO.md) 和 [`plans/phase-1/progress.md`](plans/phase-1/progress.md)
 
@@ -89,9 +91,11 @@ flowchart LR
 
 | 目录 | 说明 |
 | :--- | :--- |
-| **[`pkgs/bay`](pkgs/bay/README.md)** | **Bay 服务端**。基于 FastAPI 的编排服务，对外提供 REST API。 |
+| **[`pkgs/bay`](pkgs/bay/README.md)** | **Bay 服务端**。基于 FastAPI 的编排服务，对外提供 REST API。支持 Docker 和 K8s 双驱动。 |
 | **[`pkgs/ship`](pkgs/ship/README.md)** | **Ship 运行时**。构建为 Docker 镜像，作为执行环境。 |
-| **[`sdk-reference`](sdk-reference/)** | **客户端 SDK**。Python 客户端库（参考实现，待与新 API 对齐）。 |
+| **[`shipyard-neo-sdk`](shipyard-neo-sdk/README.md)** | **Python SDK**。类型安全的异步客户端库（`pip install shipyard-neo-sdk`）。 |
+| **[`shipyard-neo-mcp`](shipyard-neo-mcp/README.md)** | **MCP Server**。MCP 协议接入层，让 AI Agent 原生调用沙箱能力。 |
+| **[`sdk-reference`](sdk-reference/)** | **旧版 SDK 参考实现**（已被 `shipyard-neo-sdk` 替代）。 |
 | **[`plans`](plans/)** | **设计文档**。包含架构决策、API 契约和演进路线图。 |
 
 ## 📚 深度文档
@@ -104,9 +108,11 @@ flowchart LR
 
 ### 演进规划
 
-*   [Phase 1 进度](plans/phase-1/phase-1.md) - 当前阶段完成情况
+*   [Phase 1 进度](plans/phase-1/phase-1.md) - 核心功能完成情况
 *   [GC 机制设计](plans/phase-1/gc-design.md) - 资源回收策略
 *   [Phase 2 规划](plans/phase-2/phase-2.md) - 多容器与能力路由
+*   [K8s Driver 分析](plans/phase-2/k8s-driver-analysis.md) - Kubernetes 驱动设计与实现
+*   [SDK 设计](plans/phase-2/sdk-design.md) - Python SDK 架构设计
 *   [MCP 集成设计](plans/ship-refactor-and-mcp.md) - Ship MCP 协议支持
 
 ## 🚀 快速开始
@@ -126,14 +132,59 @@ cd pkgs/ship
 docker build -t ship:latest .
 ```
 
+### 使用 Python SDK
+
+```bash
+pip install shipyard-neo-sdk
+```
+
+```python
+import asyncio
+from shipyard_neo import BayClient
+
+async def main():
+    async with BayClient(
+        endpoint_url="http://localhost:8000",
+        access_token="your-token",
+    ) as client:
+        sandbox = await client.create_sandbox(profile="python-default", ttl=600)
+        result = await sandbox.python.exec("print('Hello, World!')")
+        print(result.output)
+        await sandbox.delete()
+
+asyncio.run(main())
+```
+
+### 使用 MCP Server
+
+```json
+{
+  "mcpServers": {
+    "shipyard-neo": {
+      "command": "shipyard-mcp",
+      "env": {
+        "SHIPYARD_ENDPOINT_URL": "http://localhost:8000",
+        "SHIPYARD_ACCESS_TOKEN": "your-access-token"
+      }
+    }
+  }
+}
+```
+
 ### 运行测试
 
 ```bash
 # Bay 单元测试
 cd pkgs/bay && uv run pytest tests/unit -v
 
-# Bay E2E 测试 (需要 Docker)
+# Bay E2E 测试 (Docker, docker-host 模式)
 cd pkgs/bay && ./tests/scripts/docker-host/run.sh
+
+# Bay E2E 测试 (Docker, docker-network 模式)
+cd pkgs/bay && ./tests/scripts/docker-network/run.sh
+
+# Bay K8s 测试 (需要 Kind 集群)
+cd pkgs/bay && ./tests/scripts/kind/run.sh
 ```
 
 请参考 [Bay README](pkgs/bay/README.md) 和 [Ship README](pkgs/ship/README.md) 了解更多细节。
