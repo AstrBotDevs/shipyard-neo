@@ -114,6 +114,25 @@ flowchart LR
 - SDK：`sandbox.get_execution_history(...)`、`client.skills.*`
 - MCP：`get_execution_history`、`create_skill_candidate`、`promote_skill_candidate` 等工具
 
+示例流水图（从尝试到发布）：
+
+```mermaid
+flowchart TD
+    A[Agent 执行任务<br/>python/exec shell/exec] --> B[Bay 自动记录执行证据<br/>execution_id output success time]
+    B --> C[Agent 标注证据<br/>description tags notes]
+    C --> D[创建 Skill Candidate<br/>source_execution_ids]
+    D --> E[评测 Candidate<br/>passed score report]
+    E --> F{是否通过评测}
+    F -- 否 --> G[继续迭代<br/>补充新证据]
+    G --> A
+    F -- 是 --> H[Promote 发布<br/>canary 或 stable]
+    H --> I[线上观察与指标监控]
+    I --> J{效果是否达标}
+    J -- 是 --> K[保持当前版本<br/>持续学习]
+    J -- 否 --> L[Rollback 到上一版本]
+    L --> G
+```
+
 ## 📚 深度文档
 
 ### 设计与架构
