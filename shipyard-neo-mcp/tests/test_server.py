@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from types import SimpleNamespace
 
 import pytest
@@ -260,7 +261,7 @@ class FakeClient:
 def reset_globals(monkeypatch):
     """Isolate global state between tests."""
     monkeypatch.setattr(mcp_server, "_client", None)
-    monkeypatch.setattr(mcp_server, "_sandboxes", {})
+    monkeypatch.setattr(mcp_server, "_sandboxes", OrderedDict())
 
 
 @pytest.mark.asyncio
@@ -401,4 +402,68 @@ async def test_call_tool_surfaces_bay_errors():
         "create_skill_candidate",
         {"skill_key": "csv-loader", "source_execution_ids": ["exec-1"]},
     )
-    assert response[0].text == "**API Error:** upstream failure"
+    assert "[internal_error] upstream failure" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_validation_error_for_missing_required_argument():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "sbx-1"},
+    )
+    assert response[0].text == "**Validation Error:** missing required field: code"
+
+
+@pytest.mark.asyncio
+async def test_validation_error_for_invalid_limit():
+    mcp_server._client = FakeClient()
+    mcp_server._sandboxes["sbx-1"] = FakeSandbox()
+
+    response = await mcp_server.call_tool(
+        "get_execution_history",
+        {"sandbox_id": "sbx-1", "limit": -1},
+    )
+    assert "field 'limit' must be >= 1" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_python_truncates_large_output():
+    class LargeOutputPythonCapability:
+        async def exec(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                output="x" * 13050,
+                error=None,
+                execution_id="exec-long",
+                execution_time_ms=2,
+                code="print('x')",
+            )
+
+    class LargeOutputSandbox(FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.python = LargeOutputPythonCapability()
+
+    mcp_server._client = FakeClient()
+    mcp_server._sandboxes["sbx-1"] = LargeOutputSandbox()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "sbx-1", "code": "print('x')"},
+    )
+
+    assert "truncated" in response[0].text
+    assert "execution_id: exec-long" in response[0].text
+
+
+def test_cache_eviction_keeps_bounded_size(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_MAX_SANDBOX_CACHE_SIZE", 2)
+    mcp_server._sandboxes = OrderedDict()
+
+    mcp_server._cache_sandbox(SimpleNamespace(id="sbx-1"))
+    mcp_server._cache_sandbox(SimpleNamespace(id="sbx-2"))
+    mcp_server._cache_sandbox(SimpleNamespace(id="sbx-3"))
+
+    assert list(mcp_server._sandboxes.keys()) == ["sbx-2", "sbx-3"]
