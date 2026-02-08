@@ -2,7 +2,7 @@
 
 > **审查目标**: `shipyard-neo-mcp` 的工具层稳定性、输入安全性与长期运行可靠性  
 > **审查范围**: `src/shipyard_neo_mcp/server.py` 与 `tests/`  
-> **最后更新**: 2026-02-08
+> **最后更新**: 2026-02-09
 
 ---
 
@@ -10,13 +10,21 @@
 
 MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，功能完整度高，便于 Agent 快速接入。
 
-当前主要风险集中在“无参数校验导致错误信息不友好”、“返回内容无上限可能撑爆上下文”、“全局缓存无淘汰策略”。这些问题会在真实多任务 Agent 运行中放大。
+当前核心稳定性问题已完成修复（参数校验、输出截断、错误细节透出、缓存有界化），并已补齐对应测试。
+
+## 修复状态（2026-02-09）
+
+- [x] 工具参数支持运行时校验，缺参/类型错返回 `**Validation Error:** ...`。
+- [x] 工具输出统一截断，避免长输出导致上下文爆炸。
+- [x] `BayError` 返回包含 `code + message + details`（details 截断）。
+- [x] `_sandboxes` 缓存改为有界缓存，超过上限按 LRU 淘汰。
+- [x] 新增防御性测试（校验/截断/缓存淘汰），MCP lint + test 通过。
 
 ---
 
-## 🔴 高优先级审查项
+## 已修复的高优先级项
 
-### 1. 工具参数缺少运行时校验，异常信息不具可操作性
+### 1. 工具参数缺少运行时校验，异常信息不具可操作性（已修复）
 
 **文件**:
 - `src/shipyard_neo_mcp/server.py:490`
@@ -38,7 +46,7 @@ MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，�
 
 ---
 
-### 2. 输出内容无上限，易造成上下文爆炸与性能风险
+### 2. 输出内容无上限，易造成上下文爆炸与性能风险（已修复）
 
 **文件**:
 - `src/shipyard_neo_mcp/server.py:507`
@@ -60,9 +68,9 @@ MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，�
 
 ---
 
-## 🟠 中优先级审查项
+## 已修复的中优先级项
 
-### 3. `_sandboxes` 全局缓存无淘汰机制
+### 3. `_sandboxes` 全局缓存无淘汰机制（已修复）
 
 **文件**:
 - `src/shipyard_neo_mcp/server.py:27`
@@ -79,7 +87,7 @@ MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，�
 
 ---
 
-### 4. `BayError` 信息丢失 code/details，排障信息不足
+### 4. `BayError` 信息丢失 code/details，排障信息不足（已修复）
 
 **文件**:
 - `src/shipyard_neo_mcp/server.py:841`
@@ -93,7 +101,7 @@ MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，�
 
 ---
 
-### 5. 测试覆盖偏 happy path，缺少防御性场景
+### 5. 测试覆盖偏 happy path，缺少防御性场景（已修复）
 
 **文件**:
 - `tests/test_server.py`
@@ -121,16 +129,9 @@ MCP Server 已覆盖 sandbox + history + skill lifecycle 的核心工具集，�
 
 ---
 
-## 📋 后续修复大纲（建议顺序）
+## 📋 后续优化大纲（建议顺序）
 
-1. **先处理用户可见问题**  
-完成 #1（参数校验）与 #2（输出截断）。
-
-2. **提升长期稳定性**  
-完成 #3（缓存策略）与 #4（错误细节透出）。
-
-3. **补齐测试与结构优化**  
-完成 #5（测试缺口）与 #6（分发结构重构）。
+1. 保留 #6（`call_tool` 分发重构）作为结构优化项。
 
 ---
 

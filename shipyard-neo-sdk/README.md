@@ -261,6 +261,17 @@ await sandbox.extend_ttl(300, idempotency_key="extend-req-001")
 cargo = await client.cargos.create(size_limit_mb=512, idempotency_key="cargo-req-001")
 ```
 
+## Reliability / Retry Policy
+
+`max_retries` is now enforced in the HTTP pipeline.
+
+- Auto-retry methods: `GET`, `PUT`, `DELETE`
+- `POST` retries only when `idempotency_key` is provided
+- Retryable failures: transport timeout/connection errors, HTTP `429`, HTTP `5xx`
+- Backoff: bounded exponential backoff
+
+This keeps retries safe for non-idempotent operations while still protecting against transient faults.
+
 ## Error Handling
 
 All exceptions inherit from `BayError`.
@@ -277,6 +288,8 @@ except ConflictError:
 except BayError as e:
     print(e.message, e.details)
 ```
+
+For non-JSON error responses (e.g. proxy HTML error pages), the SDK keeps status-based exception mapping and includes a bounded raw response snippet in `details` for diagnosis.
 
 ### Error Types
 

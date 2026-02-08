@@ -51,6 +51,8 @@ pip install -e .
 | `SHIPYARD_ACCESS_TOKEN` | 访问令牌 | ✅（或 `BAY_TOKEN`） |
 | `SHIPYARD_DEFAULT_PROFILE` | 默认 profile（默认 `python-default`） | ❌ |
 | `SHIPYARD_DEFAULT_TTL` | 默认 TTL 秒数（默认 `3600`） | ❌ |
+| `SHIPYARD_MAX_TOOL_TEXT_CHARS` | 工具返回文本截断上限（默认 `12000`） | ❌ |
+| `SHIPYARD_SANDBOX_CACHE_SIZE` | sandbox 本地缓存上限（默认 `256`） | ❌ |
 
 ### MCP 配置示例
 
@@ -102,6 +104,13 @@ pip install -e .
 4. 用 `evaluate_skill_candidate` 记录评测结果
 5. 用 `promote_skill_candidate` 发布版本（canary/stable）
 6. 异常时用 `rollback_skill_release` 回滚
+
+## 运行时防护（Guardrails）
+
+- 参数校验：缺少必填字段或类型不合法时，返回 `**Validation Error:** ...`，不会暴露底层 `KeyError`。
+- 输出截断：`execute_python` / `execute_shell` / `read_file` / 执行详情查询会统一截断超长内容，避免上下文爆炸。
+- API 错误透出：`BayError` 会输出 `code + message + details(截断)`，便于上层 Agent 分支决策。
+- 缓存淘汰：sandbox 缓存采用有界策略，超过 `SHIPYARD_SANDBOX_CACHE_SIZE` 后按最久未使用项淘汰。
 
 ## 关键工具参数说明
 

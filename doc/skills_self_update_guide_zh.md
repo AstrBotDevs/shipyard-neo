@@ -96,3 +96,11 @@ async with BayClient(endpoint_url="http://localhost:8000", access_token="token")
 3. **发布分级**：先 canary，再 stable。
 4. **回滚自动化**：将关键线上指标绑定 rollback 触发器。
 5. **证据可追溯**：candidate 必须保留 source execution IDs。
+
+## 7. 运行期稳态保障（已内置）
+
+1. **SDK 重试策略**：`GET/PUT/DELETE` 自动重试，`POST` 仅在带 `idempotency_key` 时重试。
+2. **错误语义保留**：即使上游返回非 JSON 错误页，也会按 HTTP 状态码映射语义化异常（如 `NotFoundError`）。
+3. **MCP 参数校验**：缺少必填参数会返回可读的 `Validation Error`，而不是裸 `KeyError`。
+4. **MCP 输出截断**：超长工具输出自动截断并标记，避免上下文爆炸。
+5. **缓存有界化**：sandbox 缓存有上限并按 LRU 淘汰，避免长时运行内存线性增长。
