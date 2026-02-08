@@ -16,6 +16,16 @@ MCP (Model Context Protocol) 服务器，为 AI 代理提供安全沙箱执行�
 | `write_file` | 写入文件到沙箱 |
 | `list_files` | 列出沙箱目录内容 |
 | `delete_file` | 删除沙箱中的文件或目录 |
+| `get_execution_history` | 查询执行历史（支持标签/成功过滤） |
+| `get_execution` | 获取单条执行记录 |
+| `get_last_execution` | 获取最近一条执行记录 |
+| `annotate_execution` | 为执行记录添加 description/tags/notes |
+| `create_skill_candidate` | 从执行记录创建技能候选 |
+| `evaluate_skill_candidate` | 记录技能候选评测结果 |
+| `promote_skill_candidate` | 将通过评测的候选发布为版本 |
+| `list_skill_candidates` | 列出技能候选 |
+| `list_skill_releases` | 列出技能发布版本 |
+| `rollback_skill_release` | 回滚到之前稳定版本 |
 
 ## 安装
 

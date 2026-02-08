@@ -129,6 +129,18 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Execution timeout in seconds. Defaults to 30.",
                     },
+                    "include_code": {
+                        "type": "boolean",
+                        "description": "Include executed code and execution metadata in response.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description for execution history annotation.",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags for execution history.",
+                    },
                 },
                 "required": ["sandbox_id", "code"],
             },
@@ -154,6 +166,18 @@ async def list_tools() -> list[Tool]:
                     "timeout": {
                         "type": "integer",
                         "description": "Execution timeout in seconds. Defaults to 30.",
+                    },
+                    "include_code": {
+                        "type": "boolean",
+                        "description": "Include executed command and execution metadata in response.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description for execution history annotation.",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags for execution history.",
                     },
                 },
                 "required": ["sandbox_id", "command"],
@@ -235,6 +259,171 @@ async def list_tools() -> list[Tool]:
                 "required": ["sandbox_id", "path"],
             },
         ),
+        Tool(
+            name="get_execution_history",
+            description="Get execution history for a sandbox with optional filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {"type": "string", "description": "The sandbox ID."},
+                    "exec_type": {
+                        "type": "string",
+                        "description": "Optional execution type filter: python or shell.",
+                    },
+                    "success_only": {
+                        "type": "boolean",
+                        "description": "Return only successful executions.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max number of entries. Defaults to 50.",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags filter.",
+                    },
+                    "has_notes": {
+                        "type": "boolean",
+                        "description": "Return only entries that have notes.",
+                    },
+                    "has_description": {
+                        "type": "boolean",
+                        "description": "Return only entries that have description.",
+                    },
+                },
+                "required": ["sandbox_id"],
+            },
+        ),
+        Tool(
+            name="get_execution",
+            description="Get one execution record by execution ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {"type": "string", "description": "The sandbox ID."},
+                    "execution_id": {"type": "string", "description": "Execution record ID."},
+                },
+                "required": ["sandbox_id", "execution_id"],
+            },
+        ),
+        Tool(
+            name="get_last_execution",
+            description="Get the latest execution record in a sandbox.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {"type": "string", "description": "The sandbox ID."},
+                    "exec_type": {
+                        "type": "string",
+                        "description": "Optional execution type filter: python or shell.",
+                    },
+                },
+                "required": ["sandbox_id"],
+            },
+        ),
+        Tool(
+            name="annotate_execution",
+            description="Add or update description/tags/notes for one execution record.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {"type": "string", "description": "The sandbox ID."},
+                    "execution_id": {"type": "string", "description": "Execution record ID."},
+                    "description": {"type": "string", "description": "Description text."},
+                    "tags": {"type": "string", "description": "Comma-separated tags."},
+                    "notes": {"type": "string", "description": "Agent notes."},
+                },
+                "required": ["sandbox_id", "execution_id"],
+            },
+        ),
+        Tool(
+            name="create_skill_candidate",
+            description="Create a reusable skill candidate from execution IDs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "skill_key": {"type": "string", "description": "Skill identifier."},
+                    "source_execution_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Execution IDs used as source evidence.",
+                    },
+                    "scenario_key": {"type": "string", "description": "Optional scenario key."},
+                    "payload_ref": {"type": "string", "description": "Optional payload reference."},
+                },
+                "required": ["skill_key", "source_execution_ids"],
+            },
+        ),
+        Tool(
+            name="evaluate_skill_candidate",
+            description="Record evaluation result for a skill candidate.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "string", "description": "Skill candidate ID."},
+                    "passed": {"type": "boolean", "description": "Whether evaluation passed."},
+                    "score": {"type": "number", "description": "Optional evaluation score."},
+                    "benchmark_id": {"type": "string", "description": "Optional benchmark ID."},
+                    "report": {"type": "string", "description": "Optional evaluation report."},
+                },
+                "required": ["candidate_id", "passed"],
+            },
+        ),
+        Tool(
+            name="promote_skill_candidate",
+            description="Promote a passing skill candidate to release.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "string", "description": "Skill candidate ID."},
+                    "stage": {
+                        "type": "string",
+                        "description": "Release stage: canary or stable. Defaults to canary.",
+                    },
+                },
+                "required": ["candidate_id"],
+            },
+        ),
+        Tool(
+            name="list_skill_candidates",
+            description="List skill candidates with optional filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Optional status filter."},
+                    "skill_key": {"type": "string", "description": "Optional skill key filter."},
+                    "limit": {"type": "integer", "description": "Max items. Defaults to 50."},
+                    "offset": {"type": "integer", "description": "Offset. Defaults to 0."},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="list_skill_releases",
+            description="List skill releases with optional filters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "skill_key": {"type": "string", "description": "Optional skill key filter."},
+                    "active_only": {"type": "boolean", "description": "Only active releases."},
+                    "stage": {"type": "string", "description": "Optional stage filter."},
+                    "limit": {"type": "integer", "description": "Max items. Defaults to 50."},
+                    "offset": {"type": "integer", "description": "Offset. Defaults to 0."},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="rollback_skill_release",
+            description="Rollback an active release to a previous known-good version.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "release_id": {"type": "string", "description": "Release ID to rollback from."},
+                },
+                "required": ["release_id"],
+            },
+        ),
     ]
 
 
@@ -301,24 +490,43 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             sandbox_id = arguments["sandbox_id"]
             code = arguments["code"]
             timeout = arguments.get("timeout", 30)
+            include_code = arguments.get("include_code", False)
+            description = arguments.get("description")
+            tags = arguments.get("tags")
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.python.exec(code, timeout=timeout)
+            result = await sandbox.python.exec(
+                code,
+                timeout=timeout,
+                include_code=include_code,
+                description=description,
+                tags=tags,
+            )
 
             if result.success:
                 output = result.output or "(no output)"
+                suffix = ""
+                if result.execution_id:
+                    suffix += f"\n\nexecution_id: {result.execution_id}"
+                if result.execution_time_ms is not None:
+                    suffix += f"\nexecution_time_ms: {result.execution_time_ms}"
+                if include_code and result.code:
+                    suffix += f"\n\ncode:\n{result.code}"
                 return [
                     TextContent(
                         type="text",
-                        text=f"**Execution successful**\n\n```\n{output}\n```",
+                        text=f"**Execution successful**\n\n```\n{output}\n```{suffix}",
                     )
                 ]
             else:
                 error = result.error or "Unknown error"
+                suffix = ""
+                if result.execution_id:
+                    suffix += f"\n\nexecution_id: {result.execution_id}"
                 return [
                     TextContent(
                         type="text",
-                        text=f"**Execution failed**\n\n```\n{error}\n```",
+                        text=f"**Execution failed**\n\n```\n{error}\n```{suffix}",
                     )
                 ]
 
@@ -327,18 +535,35 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             command = arguments["command"]
             cwd = arguments.get("cwd")
             timeout = arguments.get("timeout", 30)
+            include_code = arguments.get("include_code", False)
+            description = arguments.get("description")
+            tags = arguments.get("tags")
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.shell.exec(command, cwd=cwd, timeout=timeout)
+            result = await sandbox.shell.exec(
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                include_code=include_code,
+                description=description,
+                tags=tags,
+            )
 
             output = result.output or "(no output)"
             status = "successful" if result.success else "failed"
             exit_code = result.exit_code if result.exit_code is not None else "N/A"
+            suffix = ""
+            if result.execution_id:
+                suffix += f"\n\nexecution_id: {result.execution_id}"
+            if result.execution_time_ms is not None:
+                suffix += f"\nexecution_time_ms: {result.execution_time_ms}"
+            if include_code and result.command:
+                suffix += f"\n\ncommand:\n{result.command}"
 
             return [
                 TextContent(
                     type="text",
-                    text=f"**Command {status}** (exit code: {exit_code})\n\n```\n{output}\n```",
+                    text=f"**Command {status}** (exit code: {exit_code})\n\n```\n{output}\n```{suffix}",
                 )
             ]
 
@@ -407,6 +632,206 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 TextContent(
                     type="text",
                     text=f"Deleted `{path}` successfully.",
+                )
+            ]
+
+        elif name == "get_execution_history":
+            sandbox_id = arguments["sandbox_id"]
+            sandbox = await get_sandbox(sandbox_id)
+
+            history = await sandbox.get_execution_history(
+                exec_type=arguments.get("exec_type"),
+                success_only=arguments.get("success_only", False),
+                limit=arguments.get("limit", 50),
+                tags=arguments.get("tags"),
+                has_notes=arguments.get("has_notes", False),
+                has_description=arguments.get("has_description", False),
+            )
+
+            if not history.entries:
+                return [TextContent(type="text", text="No execution history found.")]
+
+            lines = [f"Total: {history.total}"]
+            for entry in history.entries:
+                lines.append(
+                    f"- {entry.id} | {entry.exec_type} | success={entry.success} | {entry.execution_time_ms}ms"
+                )
+                if entry.description:
+                    lines.append(f"  description: {entry.description}")
+                if entry.tags:
+                    lines.append(f"  tags: {entry.tags}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "get_execution":
+            sandbox_id = arguments["sandbox_id"]
+            execution_id = arguments["execution_id"]
+            sandbox = await get_sandbox(sandbox_id)
+            entry = await sandbox.get_execution(execution_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"execution_id: {entry.id}\n"
+                        f"type: {entry.exec_type}\n"
+                        f"success: {entry.success}\n"
+                        f"time_ms: {entry.execution_time_ms}\n"
+                        f"tags: {entry.tags or ''}\n"
+                        f"description: {entry.description or ''}\n"
+                        f"notes: {entry.notes or ''}\n\n"
+                        f"code:\n{entry.code}\n\n"
+                        f"output:\n{entry.output or ''}\n\n"
+                        f"error:\n{entry.error or ''}"
+                    ),
+                )
+            ]
+
+        elif name == "get_last_execution":
+            sandbox_id = arguments["sandbox_id"]
+            sandbox = await get_sandbox(sandbox_id)
+            entry = await sandbox.get_last_execution(exec_type=arguments.get("exec_type"))
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"execution_id: {entry.id}\n"
+                        f"type: {entry.exec_type}\n"
+                        f"success: {entry.success}\n"
+                        f"time_ms: {entry.execution_time_ms}\n"
+                        f"code:\n{entry.code}"
+                    ),
+                )
+            ]
+
+        elif name == "annotate_execution":
+            sandbox_id = arguments["sandbox_id"]
+            execution_id = arguments["execution_id"]
+            sandbox = await get_sandbox(sandbox_id)
+            entry = await sandbox.annotate_execution(
+                execution_id,
+                description=arguments.get("description"),
+                tags=arguments.get("tags"),
+                notes=arguments.get("notes"),
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Updated execution {entry.id}\n"
+                        f"description: {entry.description or ''}\n"
+                        f"tags: {entry.tags or ''}\n"
+                        f"notes: {entry.notes or ''}"
+                    ),
+                )
+            ]
+
+        elif name == "create_skill_candidate":
+            skill_key = arguments["skill_key"]
+            source_execution_ids = arguments.get("source_execution_ids", [])
+            candidate = await _client.skills.create_candidate(
+                skill_key=skill_key,
+                source_execution_ids=source_execution_ids,
+                scenario_key=arguments.get("scenario_key"),
+                payload_ref=arguments.get("payload_ref"),
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Created skill candidate {candidate.id}\n"
+                        f"skill_key: {candidate.skill_key}\n"
+                        f"status: {candidate.status.value}\n"
+                        f"source_execution_ids: {', '.join(candidate.source_execution_ids)}"
+                    ),
+                )
+            ]
+
+        elif name == "evaluate_skill_candidate":
+            candidate_id = arguments["candidate_id"]
+            evaluation = await _client.skills.evaluate_candidate(
+                candidate_id,
+                passed=arguments["passed"],
+                score=arguments.get("score"),
+                benchmark_id=arguments.get("benchmark_id"),
+                report=arguments.get("report"),
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Evaluation recorded: {evaluation.id}\n"
+                        f"candidate_id: {evaluation.candidate_id}\n"
+                        f"passed: {evaluation.passed}\n"
+                        f"score: {evaluation.score}"
+                    ),
+                )
+            ]
+
+        elif name == "promote_skill_candidate":
+            candidate_id = arguments["candidate_id"]
+            release = await _client.skills.promote_candidate(
+                candidate_id,
+                stage=arguments.get("stage", "canary"),
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Candidate promoted: {candidate_id}\n"
+                        f"release_id: {release.id}\n"
+                        f"skill_key: {release.skill_key}\n"
+                        f"version: {release.version}\n"
+                        f"stage: {release.stage.value}\n"
+                        f"active: {release.is_active}"
+                    ),
+                )
+            ]
+
+        elif name == "list_skill_candidates":
+            candidates = await _client.skills.list_candidates(
+                status=arguments.get("status"),
+                skill_key=arguments.get("skill_key"),
+                limit=arguments.get("limit", 50),
+                offset=arguments.get("offset", 0),
+            )
+            if not candidates.items:
+                return [TextContent(type="text", text="No skill candidates found.")]
+            lines = [f"Total: {candidates.total}"]
+            for item in candidates.items:
+                lines.append(
+                    f"- {item.id} | {item.skill_key} | status={item.status.value} | pass={item.latest_pass}"
+                )
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "list_skill_releases":
+            releases = await _client.skills.list_releases(
+                skill_key=arguments.get("skill_key"),
+                active_only=arguments.get("active_only", False),
+                stage=arguments.get("stage"),
+                limit=arguments.get("limit", 50),
+                offset=arguments.get("offset", 0),
+            )
+            if not releases.items:
+                return [TextContent(type="text", text="No skill releases found.")]
+            lines = [f"Total: {releases.total}"]
+            for item in releases.items:
+                lines.append(
+                    f"- {item.id} | {item.skill_key} v{item.version} | stage={item.stage.value} | active={item.is_active}"
+                )
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "rollback_skill_release":
+            release_id = arguments["release_id"]
+            rollback_release = await _client.skills.rollback_release(release_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Rollback completed.\n"
+                        f"new_release_id: {rollback_release.id}\n"
+                        f"skill_key: {rollback_release.skill_key}\n"
+                        f"version: {rollback_release.version}\n"
+                        f"rollback_of: {rollback_release.rollback_of}"
+                    ),
                 )
             ]
 
