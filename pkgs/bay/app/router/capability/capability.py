@@ -137,7 +137,11 @@ class CapabilityRouter:
                 return GullAdapter(final_endpoint)
             raise ValueError(f"Unknown runtime type: {final_runtime_type}")
 
-        return self._adapter_pool.get_or_create(final_endpoint, factory)
+        # Use endpoint + runtime_type as cache key to prevent stale adapter
+        # when Docker reassigns a host port previously used by a different
+        # runtime type (e.g., Ship port recycled to Gull).
+        pool_key = f"{final_endpoint}::{final_runtime_type}"
+        return self._adapter_pool.get_or_create(pool_key, factory)
 
     @staticmethod
     def _get_all_session_capabilities(session: Session) -> list[str]:

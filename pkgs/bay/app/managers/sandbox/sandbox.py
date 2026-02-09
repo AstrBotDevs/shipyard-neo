@@ -341,40 +341,57 @@ class SandboxManager:
         - If expires_at < now: reject (409 sandbox_expired)
         - Else: expires_at = max(old, now) + extend_by
 
-        Note: Phase 1 accepts lost updates under concurrent calls.
+        Uses in-memory lock + SELECT FOR UPDATE to prevent stale reads.
         """
         if extend_by <= 0:
             raise ValidationError("extend_by must be a positive integer")
 
-        # Start a fresh transaction to see latest committed data.
-        # This is safe because no writes have occurred yet in this method.
-        # Without this, SQLite may serve stale expires_at from a long-lived transaction.
-        await self._db.rollback()
+        # Use same per-sandbox lock as ensure_running to prevent concurrent
+        # modifications and stale reads under SQLite.
+        sandbox_lock = await get_sandbox_lock(sandbox_id)
+        async with sandbox_lock:
+            # Start a fresh transaction to see latest committed data.
+            # This is safe because no writes have occurred yet in this method.
+            # Without this, SQLite may serve stale expires_at from a long-lived transaction.
+            await self._db.rollback()
 
-        sandbox = await self.get(sandbox_id, owner)
-
-        old = sandbox.expires_at
-        if old is None:
-            raise SandboxTTLInfiniteError(
-                details={
-                    "sandbox_id": sandbox_id,
-                }
+            # Use SELECT FOR UPDATE for PostgreSQL; in-memory lock covers SQLite.
+            result = await self._db.execute(
+                select(Sandbox)
+                .where(
+                    Sandbox.id == sandbox_id,
+                    Sandbox.owner == owner,
+                    Sandbox.deleted_at.is_(None),
+                )
+                .with_for_update()
             )
+            sandbox = result.scalars().first()
 
-        now = datetime.utcnow()
-        if old < now:
-            raise SandboxExpiredError(
-                details={
-                    "sandbox_id": sandbox_id,
-                    "expires_at": old.isoformat(),
-                }
-            )
+            if sandbox is None:
+                raise NotFoundError(f"Sandbox not found: {sandbox_id}")
 
-        base = old if old > now else now
-        sandbox.expires_at = base + timedelta(seconds=extend_by)
-        await self._db.commit()
-        await self._db.refresh(sandbox)
-        return sandbox
+            old = sandbox.expires_at
+            if old is None:
+                raise SandboxTTLInfiniteError(
+                    details={
+                        "sandbox_id": sandbox_id,
+                    }
+                )
+
+            now = datetime.utcnow()
+            if old < now:
+                raise SandboxExpiredError(
+                    details={
+                        "sandbox_id": sandbox_id,
+                        "expires_at": old.isoformat(),
+                    }
+                )
+
+            base = old if old > now else now
+            sandbox.expires_at = base + timedelta(seconds=extend_by)
+            await self._db.commit()
+            await self._db.refresh(sandbox)
+            return sandbox
 
     async def get_current_session(self, sandbox: Sandbox) -> Session | None:
         """Get current session for sandbox."""

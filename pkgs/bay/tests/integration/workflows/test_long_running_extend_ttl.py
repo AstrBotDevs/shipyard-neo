@@ -105,15 +105,19 @@ class TestLongRunningExtendTTLWorkflow:
     async def test_extend_ttl_rejected_after_expiration(self):
         """After TTL expiration, extend_ttl should be rejected (no resurrection)."""
         async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+            # Use a slightly longer TTL (5s) and correspondingly longer sleep
+            # to be robust under high CPU load in parallel test environments.
+            ttl_seconds = 5
             create_resp = await client.post(
                 "/v1/sandboxes",
-                json={"profile": DEFAULT_PROFILE, "ttl": 3},
+                json={"profile": DEFAULT_PROFILE, "ttl": ttl_seconds},
             )
             assert create_resp.status_code == 201
             sandbox_id = create_resp.json()["id"]
 
             try:
-                await asyncio.sleep(3.5)
+                # Wait well past TTL expiration (ttl + 3s margin)
+                await asyncio.sleep(ttl_seconds + 3)
 
                 extend_resp = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/extend_ttl",
