@@ -9,6 +9,7 @@
 # Prerequisites:
 # - Docker daemon running
 # - ship:latest image built (cd pkgs/ship && make build)
+# - gull:latest image built (cd pkgs/gull && make build) [optional, for browser tests]
 # - bay:latest image built (cd pkgs/bay && make build)
 #
 # Usage:
@@ -146,6 +147,17 @@ build_images() {
     docker build -t ship:latest .
     
     log_info "✓ ship:latest image built"
+    
+    # Build gull:latest (optional - for browser workflow tests)
+    GULL_DIR="$(cd "${BAY_DIR}/../gull" 2>/dev/null && pwd)" || true
+    if [ -n "$GULL_DIR" ] && [ -d "$GULL_DIR" ]; then
+        log_info "Building gull:latest image..."
+        cd "$GULL_DIR"
+        docker build -t gull:latest .
+        log_info "✓ gull:latest image built"
+    else
+        log_warn "Gull directory not found at ${BAY_DIR}/../gull - skipping gull:latest build (browser tests will be skipped)"
+    fi
     
     log_info "Building bay:latest image..."
     

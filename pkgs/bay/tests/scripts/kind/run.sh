@@ -17,6 +17,7 @@
 # - For kind mode: kind installed
 # - For docker-desktop: Docker Desktop with Kubernetes enabled
 # - ship:latest and bay:latest images built
+# - gull:latest image built (optional, for browser tests)
 #
 # Usage:
 #   ./run.sh                    # Auto-detect backend
@@ -185,6 +186,17 @@ build_images() {
     docker build -t ship:latest .
     log_info "✓ ship:latest image built"
     
+    # Build gull:latest (optional - for browser workflow tests)
+    GULL_DIR="$(cd "${BAY_DIR}/../gull" 2>/dev/null && pwd)" || true
+    if [ -n "$GULL_DIR" ] && [ -d "$GULL_DIR" ]; then
+        log_info "Building gull:latest image..."
+        cd "$GULL_DIR"
+        docker build -t gull:latest .
+        log_info "✓ gull:latest image built"
+    else
+        log_warn "Gull directory not found at ${BAY_DIR}/../gull - skipping gull:latest build (browser tests will be skipped)"
+    fi
+    
     log_info "Building bay:latest image..."
     cd "$BAY_DIR"
     docker build -t bay:latest .
@@ -242,6 +254,11 @@ load_images_to_kind() {
     log_info "Loading images into kind cluster '$cluster_name'..."
     kind load docker-image ship:latest --name "$cluster_name"
     kind load docker-image bay:latest --name "$cluster_name"
+    # Load gull image if available
+    if docker image inspect gull:latest >/dev/null 2>&1; then
+        kind load docker-image gull:latest --name "$cluster_name"
+        log_info "✓ gull:latest loaded into kind cluster"
+    fi
     log_info "✓ Images loaded into kind cluster"
 }
 
@@ -404,6 +421,37 @@ data:
           - python
         idle_timeout: 300
         env: {}
+
+      - id: browser-python
+        description: "Browser automation with Python backend"
+        containers:
+          - name: ship
+            image: "ship:latest"
+            runtime_type: ship
+            runtime_port: 8123
+            resources:
+              cpus: 1.0
+              memory: "1g"
+            capabilities:
+              - python
+              - shell
+              - filesystem
+            primary_for:
+              - filesystem
+              - python
+              - shell
+            env: {}
+          - name: browser
+            image: "gull:latest"
+            runtime_type: gull
+            runtime_port: 8080
+            resources:
+              cpus: 1.0
+              memory: "2g"
+            capabilities:
+              - browser
+            env: {}
+        idle_timeout: 300
 
     gc:
       enabled: false

@@ -99,6 +99,39 @@ profiles:
     idle_timeout: 300
     env: {}
 
+  # Multi-container profile for Browser + Python (Phase 2)
+  # Used by test_browser_workflow.py
+  - id: browser-python
+    description: "Browser automation with Python backend"
+    containers:
+      - name: ship
+        image: "ship:latest"
+        runtime_type: ship
+        runtime_port: 8123
+        resources:
+          cpus: 1.0
+          memory: "1g"
+        capabilities:
+          - python
+          - shell
+          - filesystem
+        primary_for:
+          - filesystem
+          - python
+          - shell
+        env: {}
+      - name: browser
+        image: "gull:latest"
+        runtime_type: gull
+        runtime_port: 8080
+        resources:
+          cpus: 1.0
+          memory: "2g"
+        capabilities:
+          - browser
+        env: {}
+    idle_timeout: 300
+
 gc:
   # Disable automatic GC during E2E tests.
   # Tests use POST /v1/admin/gc/run to trigger GC manually when needed.

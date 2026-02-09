@@ -64,6 +64,38 @@ profiles:
     idle_timeout: 300
     env: {}
 
+  # Multi-container profile for Browser + Python (Phase 2)
+  - id: browser-python
+    description: "Browser automation with Python backend"
+    containers:
+      - name: ship
+        image: "ship:latest"
+        runtime_type: ship
+        runtime_port: 8123
+        resources:
+          cpus: 1.0
+          memory: "1g"
+        capabilities:
+          - python
+          - shell
+          - filesystem
+        primary_for:
+          - filesystem
+          - python
+          - shell
+        env: {}
+      - name: browser
+        image: "gull:latest"
+        runtime_type: gull
+        runtime_port: 8080
+        resources:
+          cpus: 1.0
+          memory: "2g"
+        capabilities:
+          - browser
+        env: {}
+    idle_timeout: 3600  # 1 hour for dev
+
   # Profile with very short idle_timeout for GC testing
   - id: short-idle-test
     image: "ship:latest"

@@ -113,11 +113,23 @@ async def test_browser_screenshot_download_and_python_parse_png_dimensions():
             assert w.status_code == 200, w.text
 
             # 2) Start HTTP server in Ship (background)
-            # Note: Ship shell endpoint does not expose "background"; we use '&' to detach.
+            # Note: Ship's shell exec uses asyncio.create_subprocess_shell + communicate()
+            # which waits for stdout pipe to close. Background processes via '&' inherit
+            # the pipe fd, causing timeout. Use python/exec + subprocess.Popen with
+            # start_new_session=True to fully detach the server process.
             r = await client.post(
-                f"/v1/sandboxes/{sandbox_id}/shell/exec",
+                f"/v1/sandboxes/{sandbox_id}/python/exec",
                 json={
-                    "command": "python -m http.server 9000 --directory /workspace/www >/workspace/http.log 2>&1 & echo started",
+                    "code": (
+                        "import subprocess, os\n"
+                        "log = open('/workspace/http.log', 'w')\n"
+                        "subprocess.Popen(\n"
+                        "    ['python', '-m', 'http.server', '9000', '--directory', '/workspace/www'],\n"
+                        "    stdout=log, stderr=log, stdin=subprocess.DEVNULL,\n"
+                        "    start_new_session=True,\n"
+                        ")\n"
+                        "print('started')\n"
+                    ),
                     "timeout": 10,
                 },
                 timeout=DEFAULT_TIMEOUT,
@@ -134,7 +146,7 @@ async def test_browser_screenshot_download_and_python_parse_png_dimensions():
 
             # 4) Gull: open page via container DNS (ship hostname)
             b1 = await client.post(
-                f"/v1/capabilities/{sandbox_id}/browser/exec",
+                f"/v1/sandboxes/{sandbox_id}/browser/exec",
                 json={"cmd": "open http://ship:9000/index.html", "timeout": 60},
                 timeout=EXEC_TIMEOUT,
             )
@@ -144,7 +156,7 @@ async def test_browser_screenshot_download_and_python_parse_png_dimensions():
             # 5) Gull: screenshot into shared /workspace
             screenshot_path = "/workspace/browser_e2e.png"
             b2 = await client.post(
-                f"/v1/capabilities/{sandbox_id}/browser/exec",
+                f"/v1/sandboxes/{sandbox_id}/browser/exec",
                 json={"cmd": f"screenshot {screenshot_path}", "timeout": 120},
                 timeout=EXEC_TIMEOUT,
             )

@@ -152,15 +152,35 @@ profiles:
   #   env:
   #     CUDA_VISIBLE_DEVICES: "0"
 
-  # Example: Browser runtime (future)
-  # - id: browser-default
-  #   image: "bay-browser:latest"
-  #   runtime_type: browser
-  #   runtime_port: 9222
-  #   resources:
-  #     cpus: 2.0
-  #     memory: "2g"
-  #   capabilities:
-  #     - browser
+  # Multi-container profile: Browser + Python (Phase 2)
+  # Uses Ship for code execution and Gull for browser automation
+  # - id: browser-python
+  #   description: "Browser automation with Python backend"
+  #   containers:
+  #     - name: ship
+  #       image: "ship:latest"
+  #       runtime_type: ship
+  #       runtime_port: 8123
+  #       resources:
+  #         cpus: 1.0
+  #         memory: "1g"
+  #       capabilities:
+  #         - python
+  #         - shell
+  #         - filesystem
+  #       primary_for:
+  #         - filesystem
+  #         - python
+  #         - shell
+  #       env: {}
+  #     - name: browser
+  #       image: "gull:latest"
+  #       runtime_type: gull
+  #       runtime_port: 8080
+  #       resources:
+  #         cpus: 1.0
+  #         memory: "2g"
+  #       capabilities:
+  #         - browser
+  #       env: {}
   #   idle_timeout: 1800
-  #   env: {}

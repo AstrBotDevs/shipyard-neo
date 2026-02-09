@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Gull runtime container
 # - Python + FastAPI wrapper
 # - agent-browser CLI (Node.js)
