@@ -181,6 +181,35 @@ class BrowserExecResponse(BaseModel):
     exit_code: int | None = None
 
 
+class BrowserBatchExecRequest(BaseModel):
+    """Request to execute a batch of browser automation commands."""
+
+    commands: list[str] = Field(..., min_length=1)
+    timeout: int = Field(default=60, ge=1, le=600)
+    stop_on_error: bool = Field(default=True, description="Stop if a command fails")
+
+
+class BrowserBatchStepResult(BaseModel):
+    """Result of a single step in a browser batch execution."""
+
+    cmd: str
+    stdout: str
+    stderr: str
+    exit_code: int
+    step_index: int
+    duration_ms: int = 0
+
+
+class BrowserBatchExecResponse(BaseModel):
+    """Browser batch execution response."""
+
+    results: list[BrowserBatchStepResult]
+    total_steps: int
+    completed_steps: int
+    success: bool
+    duration_ms: int = 0
+
+
 @router.post("/{sandbox_id}/python/exec", response_model=PythonExecResponse)
 async def exec_python(
     request: PythonExecRequest,
@@ -302,6 +331,79 @@ async def exec_browser(
         output=result.output,
         error=result.error,
         exit_code=result.exit_code,
+    )
+
+
+@router.post("/{sandbox_id}/browser/exec_batch", response_model=BrowserBatchExecResponse)
+async def exec_browser_batch(
+    request: BrowserBatchExecRequest,
+    sandbox: BrowserCapabilityDep,  # Validates browser capability at profile level
+    sandbox_mgr: SandboxManagerDep,
+    skill_svc: SkillLifecycleServiceDep,
+    owner: AuthDep,
+) -> BrowserBatchExecResponse:
+    """Execute a batch of browser automation commands in sandbox.
+
+    Phase 2: Routes to Gull runtime batch endpoint.
+    Records as a single execution history entry with exec_type=browser_batch.
+    """
+    capability_router = CapabilityRouter(sandbox_mgr)
+
+    start = time.perf_counter()
+    raw_result = await capability_router.exec_browser_batch(
+        sandbox=sandbox,
+        commands=request.commands,
+        timeout=request.timeout,
+        stop_on_error=request.stop_on_error,
+    )
+    execution_time_ms = int((time.perf_counter() - start) * 1000)
+
+    # Parse raw result into response model
+    results = [
+        BrowserBatchStepResult(
+            cmd=r.get("cmd", ""),
+            stdout=r.get("stdout", ""),
+            stderr=r.get("stderr", ""),
+            exit_code=r.get("exit_code", -1),
+            step_index=r.get("step_index", i),
+            duration_ms=r.get("duration_ms", 0),
+        )
+        for i, r in enumerate(raw_result.get("results", []))
+    ]
+
+    total_steps = raw_result.get("total_steps", len(request.commands))
+    completed_steps = raw_result.get("completed_steps", len(results))
+    success = raw_result.get("success", False)
+    batch_duration_ms = raw_result.get("duration_ms", execution_time_ms)
+
+    # Record as single execution history entry
+    combined_code = "\n".join(request.commands)
+    combined_output = "\n".join(
+        r.stdout.strip() for r in results if r.stdout.strip()
+    )
+    combined_error = "\n".join(
+        r.stderr.strip() for r in results if r.stderr.strip()
+    ) or None
+
+    current_session = await sandbox_mgr.get_current_session(sandbox)
+    await skill_svc.create_execution(
+        owner=owner,
+        sandbox_id=sandbox.id,
+        session_id=current_session.id if current_session else None,
+        exec_type=ExecutionType.BROWSER_BATCH,
+        code=combined_code,
+        success=success,
+        execution_time_ms=execution_time_ms,
+        output=combined_output,
+        error=combined_error,
+    )
+
+    return BrowserBatchExecResponse(
+        results=results,
+        total_steps=total_steps,
+        completed_steps=completed_steps,
+        success=success,
+        duration_ms=batch_duration_ms,
     )
 
 

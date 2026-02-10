@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from shipyard_neo.capabilities.base import BaseCapability
-from shipyard_neo.types import BrowserExecResult
+from shipyard_neo.types import BrowserBatchExecResult, BrowserExecResult
 
 
 class BrowserCapability(BaseCapability):
@@ -42,3 +42,41 @@ class BrowserCapability(BaseCapability):
         )
 
         return BrowserExecResult.model_validate(response)
+
+    async def exec_batch(
+        self,
+        commands: list[str],
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+    ) -> BrowserBatchExecResult:
+        """Execute a batch of browser automation commands in the sandbox.
+
+        Use this for deterministic sequences that don't need intermediate
+        reasoning (e.g., open → fill → click → wait). For flows that need
+        intermediate decisions, use individual exec() calls instead.
+
+        Args:
+            commands: List of browser commands (without 'agent-browser' prefix)
+            timeout: Overall timeout in seconds for all commands (1-600)
+            stop_on_error: Whether to stop on first failure
+
+        Returns:
+            BrowserBatchExecResult with per-step results and overall status
+
+        Raises:
+            CapabilityNotSupportedError: If browser capability not in profile
+            SessionNotReadyError: If session is still starting
+            RequestTimeoutError: If execution times out
+        """
+        response = await self._http.post(
+            f"{self._base_path}/browser/exec_batch",
+            json={
+                "commands": commands,
+                "timeout": timeout,
+                "stop_on_error": stop_on_error,
+            },
+            timeout=float(timeout) + 15,  # Add buffer for network overhead
+        )
+
+        return BrowserBatchExecResult.model_validate(response)

@@ -195,3 +195,32 @@ class GullAdapter(BaseAdapter):
             exit_code=exit_code_int,
             data={"raw": result},
         )
+
+    async def exec_browser_batch(
+        self,
+        commands: list[str],
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+    ) -> dict[str, Any]:
+        """Execute a batch of agent-browser commands via Gull.
+
+        Args:
+            commands: List of agent-browser commands without prefix
+            timeout: Overall timeout seconds for all commands
+            stop_on_error: Whether to stop on first failure
+
+        Returns:
+            Raw batch result dict from Gull /exec_batch endpoint.
+        """
+        result = await self._post(
+            "/exec_batch",
+            {
+                "commands": commands,
+                "timeout": timeout,
+                "stop_on_error": stop_on_error,
+            },
+            timeout=float(timeout + 10),
+        )
+
+        return result

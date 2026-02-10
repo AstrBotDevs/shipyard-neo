@@ -93,6 +93,21 @@ class BaseAdapter(ABC):
         """Execute shell command."""
         raise NotImplementedError("shell capability not supported")
 
+    # -- Browser batch capability --
+    async def exec_browser_batch(
+        self,
+        commands: list[str],
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+    ) -> dict[str, Any]:
+        """Execute a batch of browser commands.
+
+        Returns raw batch result dict with keys:
+        results, total_steps, completed_steps, success, duration_ms.
+        """
+        raise NotImplementedError("browser batch capability not supported")
+
     # -- Filesystem capability --
     async def read_file(self, path: str) -> str:
         """Read file content."""

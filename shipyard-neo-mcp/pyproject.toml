@@ -48,3 +48,10 @@ include = [
     "/src",
     "/README.md",
 ]
+
+[tool.uv.sources]
+shipyard-neo-sdk = { path = "../shipyard-neo-sdk", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

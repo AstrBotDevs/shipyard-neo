@@ -130,6 +130,27 @@ class BrowserExecResult(BaseModel):
     exit_code: int | None = None
 
 
+class BrowserBatchStepResult(BaseModel):
+    """Result of a single step in a browser batch execution."""
+
+    cmd: str
+    stdout: str
+    stderr: str
+    exit_code: int
+    step_index: int
+    duration_ms: int = 0
+
+
+class BrowserBatchExecResult(BaseModel):
+    """Browser batch execution result."""
+
+    results: list[BrowserBatchStepResult]
+    total_steps: int
+    completed_steps: int
+    success: bool
+    duration_ms: int = 0
+
+
 class ProfileInfo(BaseModel):
     """Profile information."""
 

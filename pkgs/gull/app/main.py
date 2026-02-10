@@ -21,6 +21,7 @@ import asyncio
 import os
 import shlex
 import shutil
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -47,6 +48,32 @@ class ExecResponse(BaseModel):
     stdout: str
     stderr: str
     exit_code: int
+
+
+class BatchExecRequest(BaseModel):
+    """Request to execute a batch of agent-browser commands."""
+    commands: list[str] = Field(..., min_length=1, description="List of commands (without agent-browser prefix)")
+    timeout: int = Field(default=60, ge=1, le=600, description="Overall timeout (seconds)")
+    stop_on_error: bool = Field(default=True, description="Stop if a command fails")
+
+
+class BatchStepResult(BaseModel):
+    """Result of a single step in a batch."""
+    cmd: str
+    stdout: str
+    stderr: str
+    exit_code: int
+    step_index: int
+    duration_ms: int
+
+
+class BatchExecResponse(BaseModel):
+    """Response from batch command execution."""
+    results: list[BatchStepResult]
+    total_steps: int
+    completed_steps: int
+    success: bool
+    duration_ms: int
 
 
 class HealthResponse(BaseModel):
@@ -194,6 +221,65 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
         stdout=stdout,
         stderr=stderr,
         exit_code=exit_code,
+    )
+
+
+@app.post("/exec_batch", response_model=BatchExecResponse)
+async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
+    """Execute a batch of agent-browser commands sequentially.
+
+    Loops over commands calling _run_agent_browser() for each.
+    Tracks per-step timing and respects overall timeout budget.
+    If stop_on_error is True, stops on first non-zero exit code.
+
+    Examples:
+        {
+            "commands": [
+                "open https://example.com",
+                "wait --load networkidle",
+                "snapshot -i"
+            ],
+            "timeout": 60,
+            "stop_on_error": true
+        }
+    """
+    batch_start = time.perf_counter()
+    results: list[BatchStepResult] = []
+
+    for i, cmd in enumerate(request.commands):
+        # Calculate remaining timeout budget
+        elapsed = time.perf_counter() - batch_start
+        remaining_timeout = max(1, int(request.timeout - elapsed))
+
+        step_start = time.perf_counter()
+        stdout, stderr, exit_code = await _run_agent_browser(
+            cmd,
+            session=SESSION_NAME,
+            profile=BROWSER_PROFILE_DIR,
+            timeout=remaining_timeout,
+        )
+        step_duration_ms = int((time.perf_counter() - step_start) * 1000)
+
+        results.append(BatchStepResult(
+            cmd=cmd,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=exit_code,
+            step_index=i,
+            duration_ms=step_duration_ms,
+        ))
+
+        if request.stop_on_error and exit_code != 0:
+            break
+
+    total_duration_ms = int((time.perf_counter() - batch_start) * 1000)
+
+    return BatchExecResponse(
+        results=results,
+        total_steps=len(request.commands),
+        completed_steps=len(results),
+        success=all(r.exit_code == 0 for r in results),
+        duration_ms=total_duration_ms,
     )
 
 

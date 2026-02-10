@@ -266,6 +266,44 @@ class CapabilityRouter:
 
         return await adapter.exec_browser(cmd, timeout=timeout)
 
+    async def exec_browser_batch(
+        self,
+        sandbox: Sandbox,
+        commands: list[str],
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+    ) -> dict[str, Any]:
+        """Execute a batch of browser automation commands in sandbox.
+
+        Phase 2: Routes to the Gull container batch endpoint.
+
+        Args:
+            sandbox: Target sandbox
+            commands: List of agent-browser commands (without prefix)
+            timeout: Overall timeout in seconds for all commands
+            stop_on_error: Whether to stop on first failure
+
+        Returns:
+            Raw batch result dict
+        """
+        session = await self.ensure_session(sandbox)
+        adapter = self._get_adapter(session, capability="browser")
+        await self._require_capability(adapter, "browser")
+
+        self._log.info(
+            "capability.browser.exec_batch",
+            sandbox_id=sandbox.id,
+            session_id=session.id,
+            num_commands=len(commands),
+        )
+
+        return await adapter.exec_browser_batch(
+            commands,
+            timeout=timeout,
+            stop_on_error=stop_on_error,
+        )
+
     # -- Filesystem capability --
 
     async def read_file(

@@ -66,6 +66,54 @@ class FakeShellCapability:
         )
 
 
+class FakeBrowserCapability:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def exec(
+        self,
+        cmd: str,
+        *,
+        timeout: int = 30,
+    ):
+        self.calls.append({"cmd": cmd, "timeout": timeout})
+        return SimpleNamespace(
+            success=True,
+            output="snapshot output\n",
+            error=None,
+            exit_code=0,
+        )
+
+    async def exec_batch(
+        self,
+        commands: list[str],
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+    ):
+        self.calls.append(
+            {"commands": commands, "timeout": timeout, "stop_on_error": stop_on_error}
+        )
+        results = [
+            SimpleNamespace(
+                cmd=cmd,
+                stdout=f"ok-{i}\n",
+                stderr="",
+                exit_code=0,
+                step_index=i,
+                duration_ms=10 + i,
+            )
+            for i, cmd in enumerate(commands)
+        ]
+        return SimpleNamespace(
+            results=results,
+            total_steps=len(commands),
+            completed_steps=len(commands),
+            success=True,
+            duration_ms=sum(r.duration_ms for r in results),
+        )
+
+
 class FakeFilesystem:
     async def read_file(self, _path: str) -> str:
         return "content"
@@ -85,6 +133,7 @@ class FakeSandbox:
         self.python = FakePythonCapability()
         self.shell = FakeShellCapability()
         self.filesystem = FakeFilesystem()
+        self.browser = FakeBrowserCapability()
 
     async def get_execution_history(
         self,
@@ -256,6 +305,22 @@ class FakeClient:
     async def get_sandbox(self, sandbox_id: str):
         return mcp_server._sandboxes[sandbox_id]
 
+    async def list_profiles(self):
+        return SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    id="python-default",
+                    capabilities=["python", "shell", "filesystem"],
+                    idle_timeout=300,
+                ),
+                SimpleNamespace(
+                    id="browser-default",
+                    capabilities=["python", "shell", "filesystem", "browser"],
+                    idle_timeout=600,
+                ),
+            ]
+        )
+
 
 @pytest.fixture(autouse=True)
 def reset_globals(monkeypatch):
@@ -274,6 +339,9 @@ async def test_list_tools_contains_history_and_skill_tools():
     assert "create_skill_candidate" in names
     assert "promote_skill_candidate" in names
     assert "rollback_skill_release" in names
+    assert "execute_browser" in names
+    assert "execute_browser_batch" in names
+    assert "list_profiles" in names
 
 
 @pytest.mark.asyncio
@@ -467,3 +535,223 @@ def test_cache_eviction_keeps_bounded_size(monkeypatch):
     mcp_server._cache_sandbox(SimpleNamespace(id="sbx-3"))
 
     assert list(mcp_server._sandboxes.keys()) == ["sbx-2", "sbx-3"]
+
+
+# -- Browser capability tests --
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_formats_success():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "open https://example.com"},
+    )
+
+    assert len(response) == 1
+    text = response[0].text
+    assert "Browser command successful" in text
+    assert "exit code: 0" in text
+    assert "snapshot output" in text
+    assert fake_sandbox.browser.calls[0]["cmd"] == "open https://example.com"
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_formats_failure():
+    class FailBrowserCapability(FakeBrowserCapability):
+        async def exec(self, cmd: str, *, timeout: int = 30):
+            return SimpleNamespace(
+                success=False,
+                output="",
+                error="element not found",
+                exit_code=1,
+            )
+
+    class FailBrowserSandbox(FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.browser = FailBrowserCapability()
+
+    mcp_server._sandboxes["sbx-1"] = FailBrowserSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "click @e99"},
+    )
+
+    text = response[0].text
+    assert "Browser command failed" in text
+    assert "exit code: 1" in text
+    assert "element not found" in text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_missing_cmd():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1"},
+    )
+    assert "missing required field: cmd" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_custom_timeout():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "screenshot /workspace/page.png", "timeout": 120},
+    )
+
+    assert fake_sandbox.browser.calls[0]["timeout"] == 120
+
+
+# -- Browser batch tests --
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_formats_success():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    commands = ["open https://example.com", "wait --load networkidle", "snapshot -i"]
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {"sandbox_id": "sbx-1", "commands": commands},
+    )
+
+    assert len(response) == 1
+    text = response[0].text
+    assert "Batch execution completed" in text
+    assert "3/3 steps" in text
+    assert "✅ Step 0" in text
+    assert "✅ Step 1" in text
+    assert "✅ Step 2" in text
+    assert "`open https://example.com`" in text
+    assert "`snapshot -i`" in text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_with_failure():
+    class PartialFailBrowserCapability(FakeBrowserCapability):
+        async def exec_batch(
+            self, commands, *, timeout=60, stop_on_error=True
+        ):
+            return SimpleNamespace(
+                results=[
+                    SimpleNamespace(
+                        cmd="open https://example.com",
+                        stdout="ok\n",
+                        stderr="",
+                        exit_code=0,
+                        step_index=0,
+                        duration_ms=10,
+                    ),
+                    SimpleNamespace(
+                        cmd="click @e99",
+                        stdout="",
+                        stderr="element not found",
+                        exit_code=1,
+                        step_index=1,
+                        duration_ms=5,
+                    ),
+                ],
+                total_steps=3,
+                completed_steps=2,
+                success=False,
+                duration_ms=15,
+            )
+
+    class PartialFailSandbox(FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.browser = PartialFailBrowserCapability()
+
+    mcp_server._sandboxes["sbx-1"] = PartialFailSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {
+            "sandbox_id": "sbx-1",
+            "commands": ["open https://example.com", "click @e99", "snapshot -i"],
+        },
+    )
+
+    text = response[0].text
+    assert "Batch execution failed" in text
+    assert "2/3 steps" in text
+    assert "✅ Step 0" in text
+    assert "❌ Step 1" in text
+    assert "element not found" in text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_passes_stop_on_error():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    await mcp_server.call_tool(
+        "execute_browser_batch",
+        {
+            "sandbox_id": "sbx-1",
+            "commands": ["open https://example.com"],
+            "stop_on_error": False,
+            "timeout": 120,
+        },
+    )
+
+    call = fake_sandbox.browser.calls[0]
+    assert call["stop_on_error"] is False
+    assert call["timeout"] == 120
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_empty_commands_is_validation_error():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {"sandbox_id": "sbx-1", "commands": []},
+    )
+    assert "non-empty array" in response[0].text
+
+
+# -- list_profiles tests --
+
+
+@pytest.mark.asyncio
+async def test_list_profiles_formats_output():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool("list_profiles", {})
+
+    assert len(response) == 1
+    text = response[0].text
+    assert "Available Profiles" in text
+    assert "python-default" in text
+    assert "browser-default" in text
+    assert "browser" in text
+    assert "idle_timeout=" in text
+
+
+@pytest.mark.asyncio
+async def test_list_profiles_empty():
+    class EmptyProfileClient(FakeClient):
+        async def list_profiles(self):
+            return SimpleNamespace(items=[])
+
+    mcp_server._client = EmptyProfileClient()
+
+    response = await mcp_server.call_tool("list_profiles", {})
+    assert response[0].text == "No profiles available."

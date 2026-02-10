@@ -20,6 +20,8 @@ class ExecutionType(str, Enum):
 
     PYTHON = "python"
     SHELL = "shell"
+    BROWSER = "browser"
+    BROWSER_BATCH = "browser_batch"
 
 
 class SkillCandidateStatus(str, Enum):

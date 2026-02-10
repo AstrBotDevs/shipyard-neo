@@ -112,8 +112,8 @@ def _read_exec_type(arguments: dict[str, Any], key: str = "exec_type") -> str | 
         return None
     if not isinstance(value, str):
         raise ValueError(f"field '{key}' must be a string")
-    if value not in {"python", "shell"}:
-        raise ValueError(f"field '{key}' must be one of: python, shell")
+    if value not in {"python", "shell", "browser", "browser_batch"}:
+        raise ValueError(f"field '{key}' must be one of: python, shell, browser, browser_batch")
     return value
 
 
@@ -565,6 +565,86 @@ async def list_tools() -> list[Tool]:
                 "required": ["release_id"],
             },
         ),
+        Tool(
+            name="execute_browser",
+            description=(
+                "Execute a browser automation command in a sandbox. "
+                "The command should NOT include the 'agent-browser' prefix — it is injected automatically. "
+                "Examples: 'open https://example.com', 'snapshot -i', 'click @e1', 'fill @e2 \"text\"'. "
+                "The sandbox must have browser capability (use a browser-enabled profile)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {
+                        "type": "string",
+                        "description": "The sandbox ID to execute in.",
+                    },
+                    "cmd": {
+                        "type": "string",
+                        "description": (
+                            "Browser automation command without 'agent-browser' prefix. "
+                            "E.g., 'open https://example.com', 'snapshot -i', 'click @e1'."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Execution timeout in seconds. Defaults to 30.",
+                    },
+                },
+                "required": ["sandbox_id", "cmd"],
+            },
+        ),
+        Tool(
+            name="execute_browser_batch",
+            description=(
+                "Execute a sequence of browser automation commands in order within one request. "
+                "Use this for deterministic sequences that don't need intermediate reasoning "
+                "(e.g., open → fill → click → wait). For flows that need intermediate decisions "
+                "(e.g., snapshot → analyze → decide), use individual execute_browser calls instead. "
+                "Commands should NOT include the 'agent-browser' prefix."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {
+                        "type": "string",
+                        "description": "The sandbox ID to execute in.",
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "List of browser commands without 'agent-browser' prefix. "
+                            "E.g., ['open https://example.com', 'wait --load networkidle', 'snapshot -i']."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Overall timeout in seconds for all commands. Defaults to 60.",
+                    },
+                    "stop_on_error": {
+                        "type": "boolean",
+                        "description": "Stop execution if a command fails. Defaults to true.",
+                    },
+                },
+                "required": ["sandbox_id", "commands"],
+            },
+        ),
+        Tool(
+            name="list_profiles",
+            description=(
+                "List available sandbox profiles. "
+                "Profiles define runtime capabilities (python, shell, filesystem, browser), "
+                "resource limits, and idle timeout. Use this to discover which profiles "
+                "are available before creating a sandbox."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -985,6 +1065,77 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     ),
                 )
             ]
+
+        elif name == "execute_browser":
+            sandbox_id = _require_str(arguments, "sandbox_id")
+            cmd = _require_str(arguments, "cmd")
+            timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
+
+            sandbox = await get_sandbox(sandbox_id)
+            result = await sandbox.browser.exec(cmd, timeout=timeout)
+
+            output = _truncate_text(result.output or "(no output)")
+            status = "successful" if result.success else "failed"
+            exit_code = result.exit_code if result.exit_code is not None else "N/A"
+            error_suffix = ""
+            if not result.success and result.error:
+                error_suffix = f"\n\nstderr:\n{_truncate_text(result.error)}"
+
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"**Browser command {status}** (exit code: {exit_code})\n\n"
+                        f"```\n{output}\n```{error_suffix}"
+                    ),
+                )
+            ]
+
+        elif name == "execute_browser_batch":
+            sandbox_id = _require_str(arguments, "sandbox_id")
+            commands = _require_str_list(arguments, "commands")
+            timeout = _read_int(arguments, "timeout", 60, min_value=1, max_value=600)
+            stop_on_error = _read_bool(arguments, "stop_on_error", True)
+
+            sandbox = await get_sandbox(sandbox_id)
+            result = await sandbox.browser.exec_batch(
+                commands,
+                timeout=timeout,
+                stop_on_error=stop_on_error,
+            )
+
+            lines = [
+                f"**Batch execution {'completed' if result.success else 'failed'}** "
+                f"({result.completed_steps}/{result.total_steps} steps, {result.duration_ms}ms)\n"
+            ]
+            for step in result.results:
+                status_icon = "✅" if step.exit_code == 0 else "❌"
+                lines.append(
+                    f"{status_icon} Step {step.step_index}: `{step.cmd}` "
+                    f"(exit={step.exit_code}, {step.duration_ms}ms)"
+                )
+                if step.stdout.strip():
+                    lines.append(f"   stdout: {_truncate_text(step.stdout.strip(), limit=500)}")
+                if step.stderr.strip():
+                    lines.append(f"   stderr: {_truncate_text(step.stderr.strip(), limit=500)}")
+
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "list_profiles":
+            profiles = await _client.list_profiles()
+
+            if not profiles.items:
+                return [TextContent(type="text", text="No profiles available.")]
+
+            lines = [f"**Available Profiles** ({len(profiles.items)})\n"]
+            for p in profiles.items:
+                caps = ", ".join(p.capabilities) if p.capabilities else "none"
+                lines.append(
+                    f"- **{p.id}**: capabilities=[{caps}], "
+                    f"idle_timeout={p.idle_timeout}s"
+                )
+
+            return [TextContent(type="text", text="\n".join(lines))]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]

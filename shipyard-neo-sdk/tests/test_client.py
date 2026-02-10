@@ -432,3 +432,128 @@ class TestBayClient:
             assert profiles.items[0].resources == {"cpus": 1.0, "memory": "512m"}
             assert profiles.items[1].id == "browser-enabled"
             assert "browser" in profiles.items[1].capabilities
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_batch_success(self, httpx_mock, mock_sandbox_response):
+        """Browser exec_batch should return BrowserBatchExecResult with per-step results."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/exec_batch",
+            json={
+                "results": [
+                    {
+                        "cmd": "open https://example.com",
+                        "stdout": "Page loaded\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 0,
+                        "duration_ms": 120,
+                    },
+                    {
+                        "cmd": "wait --load networkidle",
+                        "stdout": "Ready\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 1,
+                        "duration_ms": 80,
+                    },
+                    {
+                        "cmd": "snapshot -i",
+                        "stdout": "[snapshot content]\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 2,
+                        "duration_ms": 50,
+                    },
+                ],
+                "total_steps": 3,
+                "completed_steps": 3,
+                "success": True,
+                "duration_ms": 250,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.exec_batch(
+                [
+                    "open https://example.com",
+                    "wait --load networkidle",
+                    "snapshot -i",
+                ],
+                timeout=120,
+            )
+            assert result.success is True
+            assert result.total_steps == 3
+            assert result.completed_steps == 3
+            assert result.duration_ms == 250
+            assert len(result.results) == 3
+            assert result.results[0].cmd == "open https://example.com"
+            assert result.results[0].exit_code == 0
+            assert result.results[0].duration_ms == 120
+            assert result.results[2].cmd == "snapshot -i"
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_batch_partial_failure(self, httpx_mock, mock_sandbox_response):
+        """Browser exec_batch should handle partial failures (stop_on_error)."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/exec_batch",
+            json={
+                "results": [
+                    {
+                        "cmd": "open https://example.com",
+                        "stdout": "Page loaded\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 0,
+                        "duration_ms": 100,
+                    },
+                    {
+                        "cmd": "click @e99",
+                        "stdout": "",
+                        "stderr": "Element not found: @e99",
+                        "exit_code": 1,
+                        "step_index": 1,
+                        "duration_ms": 30,
+                    },
+                ],
+                "total_steps": 3,
+                "completed_steps": 2,
+                "success": False,
+                "duration_ms": 130,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.exec_batch(
+                ["open https://example.com", "click @e99", "snapshot -i"],
+                stop_on_error=True,
+            )
+            assert result.success is False
+            assert result.total_steps == 3
+            assert result.completed_steps == 2
+            assert len(result.results) == 2
+            assert result.results[1].exit_code == 1
+            assert result.results[1].stderr == "Element not found: @e99"
