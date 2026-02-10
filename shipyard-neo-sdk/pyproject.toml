@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/your-org/shipyard-neo"
+Repository = "https://github.com/AstrBotDevs/shipyard-neo"
 
 [build-system]
 requires = ["hatchling"]

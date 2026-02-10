@@ -155,9 +155,10 @@ POST /v1/sandboxes
 | 状态 | 含义 |
 |------|------|
 | `idle` | 无运行会话 |
-| `running` | 容器正在运行 |
+| `starting` | 会话正在启动 |
+| `ready` | 会话已运行并就绪 |
+| `failed` | 上一次会话启动失败 |
 | `expired` | TTL 已到期 |
-| `deleted` | 已软删除 |
 
 ### 1.2 列出沙箱
 
@@ -173,7 +174,7 @@ GET /v1/sandboxes
 |------|------|--------|------|
 | `limit` | int | 50 | 1-200 |
 | `cursor` | string \| null | null | 分页游标 |
-| `status` | string \| null | null | 按状态过滤: `idle`, `running`, `expired` |
+| `status` | string \| null | null | 按状态过滤: `idle`, `starting`, `ready`, `failed`, `expired` |
 
 **响应** `200` ([`SandboxListResponse`](pkgs/bay/app/api/v1/sandboxes.py:46)):
 
@@ -754,7 +755,7 @@ Skills API 管理技能的完整生命周期：候选创建 → 评估 → 晋�
 Candidate（候选）
     ↓ evaluate（评估打分）
 Candidate（已评估，passed=true）
-    ↓ promote（晋升到 canary/ga）
+    ↓ promote（晋升到 canary/stable）
 Release（发布版本）
     ↓ rollback（如有问题）
 Release（回滚版本）
@@ -784,7 +785,7 @@ POST /v1/skills/candidates
   "scenario_key": null,
   "payload_ref": null,
   "source_execution_ids": ["exe_001", "exe_002"],
-  "status": "pending",
+  "status": "draft",
   "latest_score": null,
   "latest_pass": null,
   "last_evaluated_at": null,
@@ -799,10 +800,11 @@ POST /v1/skills/candidates
 
 | 状态 | 说明 |
 |------|------|
-| `pending` | 待评估 |
-| `evaluated` | 已评估 |
+| `draft` | 草稿，待评估 |
+| `evaluating` | 评估中 |
 | `promoted` | 已晋升为发布版本 |
 | `rejected` | 已拒绝 |
+| `rolled_back` | 已回滚 |
 
 ### 5.2 列出候选
 
@@ -878,7 +880,7 @@ POST /v1/skills/candidates/{candidate_id}/promote
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `stage` | string | `"canary"` | 发布阶段: `canary`, `ga` |
+| `stage` | string | `"canary"` | 发布阶段: `canary`, `stable` |
 
 **响应** `200` ([`SkillReleaseResponse`](pkgs/bay/app/api/v1/skills.py:79)):
 
@@ -908,7 +910,7 @@ GET /v1/skills/releases
 |------|------|--------|------|
 | `skill_key` | string \| null | null | 按技能键过滤 |
 | `active_only` | bool | false | 仅返回活跃版本 |
-| `stage` | string \| null | null | 按阶段过滤: `canary`, `ga` |
+| `stage` | string \| null | null | 按阶段过滤: `canary`, `stable` |
 | `limit` | int | 100 | 1-500 |
 | `offset` | int | 0 | 偏移量 |
 

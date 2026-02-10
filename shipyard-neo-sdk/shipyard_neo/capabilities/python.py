@@ -39,15 +39,19 @@ class PythonCapability(BaseCapability):
             RequestTimeoutError: If execution times out
             ShipError: If runtime error occurs
         """
+        from shipyard_neo.types import _PythonExecRequest
+
+        body = _PythonExecRequest(
+            code=code,
+            timeout=timeout,
+            include_code=include_code,
+            description=description,
+            tags=tags,
+        ).model_dump(exclude_none=True)
+
         response = await self._http.post(
             f"{self._base_path}/python/exec",
-            json={
-                "code": code,
-                "timeout": timeout,
-                "include_code": include_code,
-                "description": description,
-                "tags": tags,
-            },
+            json=body,
             timeout=float(timeout) + 10,  # Add buffer for network overhead
         )
 

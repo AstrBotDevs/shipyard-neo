@@ -68,7 +68,7 @@ SDK 的主入口。
 ```python
 from shipyard_neo import BayClient
 
-# 使用环境变量 (SHIPYARD_ENDPOINT_URL, SHIPYARD_ACCESS_TOKEN)
+# 使用环境变量 (BAY_ENDPOINT, BAY_TOKEN)
 async with BayClient() as client:
     ...
 
@@ -77,6 +77,7 @@ async with BayClient(
     endpoint_url="http://localhost:8000",
     access_token="your-token",
     timeout=30.0,  # 默认请求超时时间
+    max_retries=3,  # 最大重试次数
 ) as client:
     ...
 ```
@@ -88,7 +89,9 @@ async with BayClient(
 | `create_sandbox()` | 创建新沙箱 |
 | `get_sandbox(id)` | 获取已存在的沙箱 |
 | `list_sandboxes()` | 列出所有沙箱 |
+| `list_profiles()` | 列出可用的运行时 Profile |
 | `cargos` | 访问 CargoManager 进行 cargo 操作 |
+| `skills` | 访问 SkillManager 进行技能生命周期管理 |
 
 ### 创建沙箱
 
@@ -168,6 +171,15 @@ while result.next_cursor:
 
 # 按状态过滤
 result = await client.list_sandboxes(status=SandboxStatus.READY)
+```
+
+### 列出 Profiles
+
+```python
+# 获取可用 Profile 列表
+profiles = await client.list_profiles(detail=True)
+for p in profiles.items:
+    print(p.id, p.capabilities)
 ```
 
 ## 能力
@@ -342,6 +354,27 @@ data = await sandbox.filesystem.download("assets/image.png")
 open("downloaded.png", "wb").write(data)
 ```
 
+### Browser 能力
+
+在沙箱中执行浏览器自动化命令（需要 Profile 支持 `browser` 能力）。
+
+```python
+# 单条命令
+result = await sandbox.browser.exec("open https://example.com")
+print(result.success, result.output)
+
+# 批量命令（用于不需要中间决策的确定性流程）
+batch = await sandbox.browser.exec_batch(
+    [
+        "open https://example.com",
+        "wait --load networkidle",
+        "snapshot -i",
+    ],
+    timeout=120,
+)
+print(batch.success, batch.completed_steps, batch.total_steps)
+```
+
 #### FileInfo
 
 | 属性 | 类型 | 描述 |
@@ -449,6 +482,38 @@ await sandbox2.delete()
 await client.cargos.delete(cargo.id)
 ```
 
+## Skill 生命周期管理（client.skills）
+
+```python
+from shipyard_neo import SkillReleaseStage
+
+# 1) 收集执行证据
+py = await sandbox.python.exec("print('step1')", tags="etl")
+sh = await sandbox.shell.exec("echo step2", tags="etl")
+
+# 2) 创建候选
+candidate = await client.skills.create_candidate(
+    skill_key="etl-loader",
+    source_execution_ids=[py.execution_id, sh.execution_id],
+    scenario_key="csv-import",
+)
+
+# 3) 评估
+_ = await client.skills.evaluate_candidate(
+    candidate.id,
+    passed=True,
+    score=0.96,
+    report="ok",
+)
+
+# 4) 晋升发布
+release = await client.skills.promote_candidate(candidate.id, stage=SkillReleaseStage.CANARY)
+
+# 5) 查询 / 回滚
+_ = await client.skills.list_releases(skill_key="etl-loader", active_only=True)
+_ = await client.skills.rollback_release(release.id)
+```
+
 ## 错误处理
 
 所有错误都继承自 `BayError`。
@@ -489,13 +554,13 @@ except BayError as e:
 | `NotFoundError` | 404 | 资源未找到 |
 | `QuotaExceededError` | 429 | 超出速率限制或配额 |
 | `ConflictError` | 409 | 资源冲突（如 cargo 正在使用中） |
-| `ValidationError` | 422 | 请求参数无效 |
+| `ValidationError` | 400 | 请求参数无效 |
 | `SessionNotReadyError` | 503 | 会话未就绪（请重试） |
 | `RequestTimeoutError` | 504 | 请求超时 |
 | `ShipError` | 502 | Ship（容器）错误 |
-| `SandboxExpiredError` | 410 | 沙箱 TTL 已过期 |
-| `SandboxTTLInfiniteError` | 400 | 无法延长无限期 TTL |
-| `CapabilityNotSupportedError` | 403 | Profile 不支持该能力 |
+| `SandboxExpiredError` | 409 | 沙箱 TTL 已过期 |
+| `SandboxTTLInfiniteError` | 409 | 无法延长无限期 TTL |
+| `CapabilityNotSupportedError` | 400 | Profile 不支持该能力 |
 | `InvalidPathError` | 400 | 文件路径无效 |
 | `CargoFileNotFoundError` | 404 | 工作区中未找到文件 |
 
@@ -531,14 +596,16 @@ SDK 支持通过环境变量进行配置：
 
 | 变量 | 描述 |
 |:--|:--|
-| `SHIPYARD_ENDPOINT_URL` | Bay API 端点 URL |
-| `SHIPYARD_ACCESS_TOKEN` | 认证令牌 |
+| `BAY_ENDPOINT` | Bay API 端点 URL |
+| `BAY_TOKEN` | 认证令牌 |
+| `BAY_TIMEOUT` | 默认请求超时时间（秒） |
+| `BAY_MAX_RETRIES` | 最大重试次数 |
 
 ```python
 import os
 
-os.environ["SHIPYARD_ENDPOINT_URL"] = "http://localhost:8000"
-os.environ["SHIPYARD_ACCESS_TOKEN"] = "your-token"
+os.environ["BAY_ENDPOINT"] = "http://localhost:8000"
+os.environ["BAY_TOKEN"] = "your-token"
 
 # 无需显式配置
 async with BayClient() as client:

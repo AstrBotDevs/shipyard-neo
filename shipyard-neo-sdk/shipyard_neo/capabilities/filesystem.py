@@ -44,9 +44,13 @@ class FilesystemCapability(BaseCapability):
         Raises:
             InvalidPathError: If path is invalid
         """
+        from shipyard_neo.types import _FileWriteRequest
+
+        body = _FileWriteRequest(path=path, content=content).model_dump(exclude_none=True)
+
         await self._http.put(
             f"{self._base_path}/filesystem/files",
-            json={"path": path, "content": content},
+            json=body,
         )
 
     async def list_dir(self, path: str = ".") -> list[FileInfo]:

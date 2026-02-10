@@ -139,11 +139,11 @@ class BayClient:
         Returns:
             Sandbox object for the created sandbox
         """
-        body: dict = {"profile": profile}
-        if cargo_id is not None:
-            body["cargo_id"] = cargo_id
-        if ttl is not None:
-            body["ttl"] = ttl
+        from shipyard_neo.types import _CreateSandboxRequest
+
+        body = _CreateSandboxRequest(profile=profile, cargo_id=cargo_id, ttl=ttl).model_dump(
+            exclude_none=True
+        )
 
         response = await self.http.post(
             "/v1/sandboxes",

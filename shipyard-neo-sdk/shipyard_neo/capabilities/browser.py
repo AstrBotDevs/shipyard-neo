@@ -32,12 +32,13 @@ class BrowserCapability(BaseCapability):
             SessionNotReadyError: If session is still starting
             RequestTimeoutError: If execution times out
         """
+        from shipyard_neo.types import _BrowserExecRequest
+
+        body = _BrowserExecRequest(cmd=cmd, timeout=timeout).model_dump(exclude_none=True)
+
         response = await self._http.post(
             f"{self._base_path}/browser/exec",
-            json={
-                "cmd": cmd,
-                "timeout": timeout,
-            },
+            json=body,
             timeout=float(timeout) + 10,  # Add buffer for network overhead
         )
 
@@ -69,13 +70,17 @@ class BrowserCapability(BaseCapability):
             SessionNotReadyError: If session is still starting
             RequestTimeoutError: If execution times out
         """
+        from shipyard_neo.types import _BrowserBatchExecRequest
+
+        body = _BrowserBatchExecRequest(
+            commands=commands,
+            timeout=timeout,
+            stop_on_error=stop_on_error,
+        ).model_dump(exclude_none=True)
+
         response = await self._http.post(
             f"{self._base_path}/browser/exec_batch",
-            json={
-                "commands": commands,
-                "timeout": timeout,
-                "stop_on_error": stop_on_error,
-            },
+            json=body,
             timeout=float(timeout) + 15,  # Add buffer for network overhead
         )
 

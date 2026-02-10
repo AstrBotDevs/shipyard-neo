@@ -30,6 +30,7 @@ RUN npm install -g agent-browser \
   && rm -rf /tmp/* /var/lib/apt/lists/*
 
 # --- Python deps (uv) ---
+# Keep README.md in build context because pyproject.toml declares it as the project readme.
 COPY pyproject.toml uv.lock README.md ./
 COPY app ./app
 

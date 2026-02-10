@@ -279,6 +279,9 @@ class SkillReleaseList(BaseModel):
 
 
 # Internal request models (not exported)
+#
+# These are SDK-internal helpers to build request bodies consistently and
+# keep validation/typing centralized.
 
 
 class _CreateSandboxRequest(BaseModel):
@@ -300,6 +303,9 @@ class _PythonExecRequest(BaseModel):
 
     code: str
     timeout: int = Field(default=30, ge=1, le=300)
+    include_code: bool = False
+    description: str | None = None
+    tags: str | None = None
 
 
 class _ShellExecRequest(BaseModel):
@@ -308,6 +314,24 @@ class _ShellExecRequest(BaseModel):
     command: str
     timeout: int = Field(default=30, ge=1, le=300)
     cwd: str | None = None
+    include_code: bool = False
+    description: str | None = None
+    tags: str | None = None
+
+
+class _BrowserExecRequest(BaseModel):
+    """Internal: Browser exec request body."""
+
+    cmd: str
+    timeout: int = Field(default=30, ge=1, le=300)
+
+
+class _BrowserBatchExecRequest(BaseModel):
+    """Internal: Browser exec_batch request body."""
+
+    commands: list[str] = Field(..., min_length=1)
+    timeout: int = Field(default=60, ge=1, le=600)
+    stop_on_error: bool = True
 
 
 class _FileWriteRequest(BaseModel):

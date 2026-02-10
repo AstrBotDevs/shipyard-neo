@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from shipyard_neo.types import (
     SkillCandidateInfo,
     SkillCandidateList,
@@ -12,11 +14,14 @@ from shipyard_neo.types import (
     SkillReleaseStage,
 )
 
+if TYPE_CHECKING:
+    from shipyard_neo._http import HTTPClient
+
 
 class SkillManager:
     """Skill lifecycle API client."""
 
-    def __init__(self, http) -> None:
+    def __init__(self, http: "HTTPClient") -> None:
         self._http = http
 
     async def create_candidate(
@@ -27,14 +32,18 @@ class SkillManager:
         scenario_key: str | None = None,
         payload_ref: str | None = None,
     ) -> SkillCandidateInfo:
+        body = {
+            "skill_key": skill_key,
+            "source_execution_ids": source_execution_ids,
+            "scenario_key": scenario_key,
+            "payload_ref": payload_ref,
+        }
+        # Keep payload compatible with API: omit null fields.
+        body = {k: v for k, v in body.items() if v is not None}
+
         response = await self._http.post(
             "/v1/skills/candidates",
-            json={
-                "skill_key": skill_key,
-                "source_execution_ids": source_execution_ids,
-                "scenario_key": scenario_key,
-                "payload_ref": payload_ref,
-            },
+            json=body,
         )
         return SkillCandidateInfo.model_validate(response)
 
@@ -71,14 +80,17 @@ class SkillManager:
         benchmark_id: str | None = None,
         report: str | None = None,
     ) -> SkillEvaluationInfo:
+        body = {
+            "passed": passed,
+            "score": score,
+            "benchmark_id": benchmark_id,
+            "report": report,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
         response = await self._http.post(
             f"/v1/skills/candidates/{candidate_id}/evaluate",
-            json={
-                "passed": passed,
-                "score": score,
-                "benchmark_id": benchmark_id,
-                "report": report,
-            },
+            json=body,
         )
         return SkillEvaluationInfo.model_validate(response)
 

@@ -41,15 +41,16 @@ class ShellCapability(BaseCapability):
             ShipError: If runtime error occurs
             InvalidPathError: If cwd is invalid
         """
-        body: dict = {
-            "command": command,
-            "timeout": timeout,
-            "include_code": include_code,
-            "description": description,
-            "tags": tags,
-        }
-        if cwd is not None:
-            body["cwd"] = cwd
+        from shipyard_neo.types import _ShellExecRequest
+
+        body = _ShellExecRequest(
+            command=command,
+            timeout=timeout,
+            cwd=cwd,
+            include_code=include_code,
+            description=description,
+            tags=tags,
+        ).model_dump(exclude_none=True)
 
         response = await self._http.post(
             f"{self._base_path}/shell/exec",

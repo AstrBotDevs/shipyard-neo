@@ -41,9 +41,9 @@ class CargoManager:
         Returns:
             CargoInfo for the created cargo
         """
-        body: dict = {}
-        if size_limit_mb is not None:
-            body["size_limit_mb"] = size_limit_mb
+        from shipyard_neo.types import _CreateCargoRequest
+
+        body = _CreateCargoRequest(size_limit_mb=size_limit_mb).model_dump(exclude_none=True)
 
         response = await self._http.post(
             "/v1/cargos",

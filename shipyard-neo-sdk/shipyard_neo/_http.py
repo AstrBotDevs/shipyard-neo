@@ -260,30 +260,39 @@ class HTTPClient:
     ) -> dict[str, Any]:
         """Upload a file via multipart/form-data.
 
-        Args:
-            path: API path
-            file_content: Binary file content
-            file_path: Target path in sandbox workspace
-            timeout: Override default timeout
-
-        Returns:
-            Parsed JSON response
+        Retries are enabled for transient transport errors and HTTP 429/5xx.
+        (Upload is treated as retryable because the server-side operation is
+        effectively idempotent for a given target path.)
         """
         files = {"file": ("upload", file_content, "application/octet-stream")}
         data = {"path": file_path}
 
-        # httpx automatically sets Content-Type: multipart/form-data with boundary
-        response = await self.client.post(
-            path,
-            files=files,
-            data=data,
-            timeout=timeout,
-        )
+        max_attempts = self._max_retries + 1
+        for attempt in range(max_attempts):
+            try:
+                # httpx automatically sets Content-Type: multipart/form-data with boundary
+                response = await self.client.post(
+                    path,
+                    files=files,
+                    data=data,
+                    timeout=timeout,
+                )
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(self._retry_delay_seconds(attempt))
+                    continue
+                raise
 
-        body = self._parse_json_or_error_payload(response)
-        if response.status_code >= 400:
-            raise_for_error_response(response.status_code, body)
-        return body
+            if attempt < max_attempts - 1 and self._is_retryable_status(response.status_code):
+                await asyncio.sleep(self._retry_delay_seconds(attempt))
+                continue
+
+            body = self._parse_json_or_error_payload(response)
+            if response.status_code >= 400:
+                raise_for_error_response(response.status_code, body)
+            return body
+
+        raise RuntimeError("HTTP upload attempt loop exhausted unexpectedly")
 
     async def download(
         self,

@@ -133,9 +133,13 @@ class Sandbox:
             SandboxExpiredError: If sandbox has already expired
             SandboxTTLInfiniteError: If sandbox has infinite TTL
         """
+        from shipyard_neo.types import _ExtendTTLRequest
+
+        body = _ExtendTTLRequest(extend_by=seconds).model_dump(exclude_none=True)
+
         response = await self._http.post(
             f"/v1/sandboxes/{self.id}/extend_ttl",
-            json={"extend_by": seconds},
+            json=body,
             idempotency_key=idempotency_key,
         )
         self._info = SandboxInfo.model_validate(response)
@@ -197,14 +201,21 @@ class Sandbox:
         tags: str | None = None,
         notes: str | None = None,
     ) -> ExecutionHistoryEntry:
-        """Annotate one execution history record."""
+        """Annotate one execution history record.
+
+        Only fields explicitly provided (not None) are sent to the API.
+        """
+        payload: dict[str, str] = {}
+        if description is not None:
+            payload["description"] = description
+        if tags is not None:
+            payload["tags"] = tags
+        if notes is not None:
+            payload["notes"] = notes
+
         response = await self._http.request(
             "PATCH",
             f"/v1/sandboxes/{self.id}/history/{execution_id}",
-            json={
-                "description": description,
-                "tags": tags,
-                "notes": notes,
-            },
+            json=payload,
         )
         return ExecutionHistoryEntry.model_validate(response)
