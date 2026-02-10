@@ -89,9 +89,7 @@ def validate_relative_path(path: str, *, field_name: str = "path") -> str:
     return "/".join(parts)
 
 
-def validate_optional_relative_path(
-    path: str | None, *, field_name: str = "path"
-) -> str | None:
+def validate_optional_relative_path(path: str | None, *, field_name: str = "path") -> str | None:
     """Validate an optional relative path.
 
     If path is None, returns None without validation.

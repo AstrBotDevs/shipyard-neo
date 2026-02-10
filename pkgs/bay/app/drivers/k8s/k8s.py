@@ -183,15 +183,14 @@ class K8sDriver(Driver):
         )
 
         # Build environment variables
-        env = [
-            client.V1EnvVar(name=k, value=v)
-            for k, v in profile.env.items()
-        ]
-        env.extend([
-            client.V1EnvVar(name="BAY_SESSION_ID", value=session.id),
-            client.V1EnvVar(name="BAY_SANDBOX_ID", value=session.sandbox_id),
-            client.V1EnvVar(name="BAY_WORKSPACE_PATH", value=WORKSPACE_MOUNT_PATH),
-        ])
+        env = [client.V1EnvVar(name=k, value=v) for k, v in profile.env.items()]
+        env.extend(
+            [
+                client.V1EnvVar(name="BAY_SESSION_ID", value=session.id),
+                client.V1EnvVar(name="BAY_SANDBOX_ID", value=session.sandbox_id),
+                client.V1EnvVar(name="BAY_WORKSPACE_PATH", value=WORKSPACE_MOUNT_PATH),
+            ]
+        )
 
         # Build resource requirements
         memory_k8s = _parse_memory(profile.resources.memory)
@@ -236,8 +235,7 @@ class K8sDriver(Driver):
         image_pull_secrets = None
         if self._image_pull_secrets:
             image_pull_secrets = [
-                client.V1LocalObjectReference(name=secret)
-                for secret in self._image_pull_secrets
+                client.V1LocalObjectReference(name=secret) for secret in self._image_pull_secrets
             ]
 
         # Build Pod spec
@@ -311,9 +309,7 @@ class K8sDriver(Driver):
 
                 if phase in ("Failed", "Succeeded"):
                     # Pod terminated unexpectedly
-                    raise RuntimeError(
-                        f"Pod {container_id} terminated with phase: {phase}"
-                    )
+                    raise RuntimeError(f"Pod {container_id} terminated with phase: {phase}")
 
                 self._log.debug(
                     "k8s.start.waiting",
@@ -408,9 +404,7 @@ class K8sDriver(Driver):
             timeout=timeout,
         )
 
-    async def status(
-        self, container_id: str, *, runtime_port: int | None = None
-    ) -> ContainerInfo:
+    async def status(self, container_id: str, *, runtime_port: int | None = None) -> ContainerInfo:
         """Get Pod status."""
         api_client = await self._get_api_client()
         v1 = client.CoreV1Api(api_client)
@@ -562,9 +556,7 @@ class K8sDriver(Driver):
 
     # Runtime instance discovery (for GC)
 
-    async def list_runtime_instances(
-        self, *, labels: dict[str, str]
-    ) -> list[RuntimeInstance]:
+    async def list_runtime_instances(self, *, labels: dict[str, str]) -> list[RuntimeInstance]:
         """List Pods matching labels.
 
         Used by OrphanContainerGC to discover Pods that may be orphaned.
@@ -678,16 +670,15 @@ class K8sDriver(Driver):
     ) -> client.V1Container:
         """Build a K8s V1Container from a ContainerSpec."""
         # Environment variables
-        env = [
-            client.V1EnvVar(name=k, value=v)
-            for k, v in spec.env.items()
-        ]
-        env.extend([
-            client.V1EnvVar(name="BAY_SESSION_ID", value=session.id),
-            client.V1EnvVar(name="BAY_SANDBOX_ID", value=session.sandbox_id),
-            client.V1EnvVar(name="BAY_WORKSPACE_PATH", value=WORKSPACE_MOUNT_PATH),
-            client.V1EnvVar(name="BAY_CONTAINER_NAME", value=spec.name),
-        ])
+        env = [client.V1EnvVar(name=k, value=v) for k, v in spec.env.items()]
+        env.extend(
+            [
+                client.V1EnvVar(name="BAY_SESSION_ID", value=session.id),
+                client.V1EnvVar(name="BAY_SANDBOX_ID", value=session.sandbox_id),
+                client.V1EnvVar(name="BAY_WORKSPACE_PATH", value=WORKSPACE_MOUNT_PATH),
+                client.V1EnvVar(name="BAY_CONTAINER_NAME", value=spec.name),
+            ]
+        )
 
         # Resource requirements
         memory_k8s = _parse_memory(spec.resources.memory)
@@ -756,8 +747,7 @@ class K8sDriver(Driver):
 
         # Build K8s containers from all specs
         k8s_containers = [
-            self._build_k8s_container(spec, session=session)
-            for spec in containers_specs
+            self._build_k8s_container(spec, session=session) for spec in containers_specs
         ]
 
         # Volume: mount Cargo PVC
@@ -774,8 +764,7 @@ class K8sDriver(Driver):
         image_pull_secrets = None
         if self._image_pull_secrets:
             image_pull_secrets = [
-                client.V1LocalObjectReference(name=secret)
-                for secret in self._image_pull_secrets
+                client.V1LocalObjectReference(name=secret) for secret in self._image_pull_secrets
             ]
 
         # Build Pod
@@ -862,9 +851,7 @@ class K8sDriver(Driver):
                     break
 
                 if phase in ("Failed", "Succeeded"):
-                    raise RuntimeError(
-                        f"Pod {pod_name} terminated with phase: {phase}"
-                    )
+                    raise RuntimeError(f"Pod {pod_name} terminated with phase: {phase}")
 
             except ApiException as e:
                 if e.status == 404:
@@ -888,9 +875,7 @@ class K8sDriver(Driver):
         if pod.spec and pod.spec.containers:
             for k8s_container in pod.spec.containers:
                 if k8s_container.ports:
-                    container_ports[k8s_container.name] = (
-                        k8s_container.ports[0].container_port
-                    )
+                    container_ports[k8s_container.name] = k8s_container.ports[0].container_port
 
         for c in containers:
             port = container_ports.get(c.name, 8123)

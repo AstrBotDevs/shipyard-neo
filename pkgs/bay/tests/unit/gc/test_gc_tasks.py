@@ -185,9 +185,7 @@ class TestExpiredSandboxGCQueryConditions:
         db_session.execute.return_value = result_mock
 
         task = ExpiredSandboxGC(driver, db_session)
-        task._process_sandbox = AsyncMock(
-            side_effect=[RuntimeError("delete failed"), True]
-        )
+        task._process_sandbox = AsyncMock(side_effect=[RuntimeError("delete failed"), True])
 
         result = await task.run()
 

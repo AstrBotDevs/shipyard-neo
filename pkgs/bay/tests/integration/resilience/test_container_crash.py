@@ -100,9 +100,9 @@ class TestContainerCrash:
                     if new_runtime_id is not None and old_runtime_identity is not None:
                         new_runtime_identity = get_runtime_identity(new_runtime_id)
                         if new_runtime_identity is not None:
-                            assert (
-                                new_runtime_identity != old_runtime_identity
-                            ), "Should have created a new runtime after crash recovery"
+                            assert new_runtime_identity != old_runtime_identity, (
+                                "Should have created a new runtime after crash recovery"
+                            )
                 elif exec2.status_code == 503:
                     # Recovery in progress - retry once more
                     await asyncio.sleep(2.0)

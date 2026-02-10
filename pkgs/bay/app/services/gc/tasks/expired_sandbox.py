@@ -77,10 +77,7 @@ class ExpiredSandboxGC(GCTask):
         # Extract needed attributes upfront to avoid lazy loading issues after rollback.
         # After _process_sandbox calls rollback, the sandbox objects become detached
         # and accessing their attributes would trigger lazy loading in wrong context.
-        sandbox_data = [
-            (sandbox.id, sandbox.owner, sandbox.cargo_id)
-            for sandbox in sandboxes
-        ]
+        sandbox_data = [(sandbox.id, sandbox.owner, sandbox.cargo_id) for sandbox in sandboxes]
 
         self._log.info(
             "gc.expired_sandbox.found",
@@ -104,9 +101,7 @@ class ExpiredSandboxGC(GCTask):
 
         return result
 
-    async def _process_sandbox(
-        self, sandbox_id: str, owner: str, cargo_id: str
-    ) -> bool:
+    async def _process_sandbox(self, sandbox_id: str, owner: str, cargo_id: str) -> bool:
         """Process a single sandbox. Returns True if cleaned, False if skipped."""
         lock = await get_sandbox_lock(sandbox_id)
         async with lock:

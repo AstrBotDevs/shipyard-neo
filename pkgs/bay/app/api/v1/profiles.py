@@ -67,7 +67,9 @@ def _profile_to_response(
     if p.resources is not None:
         resources = ResourceSpecResponse(cpus=p.resources.cpus, memory=p.resources.memory)
     elif primary is not None:
-        resources = ResourceSpecResponse(cpus=primary.resources.cpus, memory=primary.resources.memory)
+        resources = ResourceSpecResponse(
+            cpus=primary.resources.cpus, memory=primary.resources.memory
+        )
     else:
         resources = ResourceSpecResponse(cpus=1.0, memory="1g")
 

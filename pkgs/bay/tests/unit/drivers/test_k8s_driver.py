@@ -234,17 +234,13 @@ class TestK8sDriverListRuntimeInstances:
         mock_pod1 = MagicMock()
         mock_pod1.metadata.name = "bay-session-abc123"
         mock_pod1.metadata.labels = {"bay.managed": "true", "bay.session_id": "abc123"}
-        mock_pod1.metadata.creation_timestamp = datetime(
-            2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc
-        )
+        mock_pod1.metadata.creation_timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         mock_pod1.status.phase = "Running"
 
         mock_pod2 = MagicMock()
         mock_pod2.metadata.name = "bay-session-def456"
         mock_pod2.metadata.labels = {"bay.managed": "true", "bay.session_id": "def456"}
-        mock_pod2.metadata.creation_timestamp = datetime(
-            2025, 1, 1, 13, 0, 0, tzinfo=timezone.utc
-        )
+        mock_pod2.metadata.creation_timestamp = datetime(2025, 1, 1, 13, 0, 0, tzinfo=timezone.utc)
         mock_pod2.status.phase = "Pending"
 
         mock_pod_list = MagicMock()
@@ -257,9 +253,7 @@ class TestK8sDriverListRuntimeInstances:
             with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
                 mock_client.return_value = MagicMock()
 
-                instances = await driver.list_runtime_instances(
-                    labels={"bay.managed": "true"}
-                )
+                instances = await driver.list_runtime_instances(labels={"bay.managed": "true"})
 
                 assert len(instances) == 2
                 assert instances[0].id == "bay-session-abc123"
@@ -285,9 +279,7 @@ class TestK8sDriverListRuntimeInstances:
             with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
                 mock_client.return_value = MagicMock()
 
-                instances = await driver.list_runtime_instances(
-                    labels={"bay.managed": "true"}
-                )
+                instances = await driver.list_runtime_instances(labels={"bay.managed": "true"})
 
                 assert len(instances) == 0
 
@@ -335,9 +327,7 @@ class TestK8sDriverVolumeOperations:
         from kubernetes_asyncio.client import ApiException
 
         mock_v1 = AsyncMock()
-        mock_v1.read_namespaced_persistent_volume_claim.side_effect = ApiException(
-            status=404
-        )
+        mock_v1.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
 
         with patch.object(driver, "_get_api_client") as mock_client:
             with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):

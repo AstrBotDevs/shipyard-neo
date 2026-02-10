@@ -109,7 +109,9 @@ class GullAdapter(BaseAdapter):
     async def _get(self, path: str, **kwargs: Any) -> dict[str, Any]:
         return await self._request("GET", path, **kwargs)
 
-    async def _post(self, path: str, json: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    async def _post(
+        self, path: str, json: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         return await self._request("POST", path, json=json, **kwargs)
 
     async def get_meta(self) -> RuntimeMeta:

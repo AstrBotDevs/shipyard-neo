@@ -58,7 +58,9 @@ def _read_positive_int_env(name: str, default: int) -> int:
 
 _MAX_TOOL_TEXT_CHARS = _read_positive_int_env("SHIPYARD_MAX_TOOL_TEXT_CHARS", 12000)
 _MAX_SANDBOX_CACHE_SIZE = _read_positive_int_env("SHIPYARD_SANDBOX_CACHE_SIZE", 256)
-_MAX_WRITE_FILE_BYTES = _read_positive_int_env("SHIPYARD_MAX_WRITE_FILE_BYTES", 5 * 1024 * 1024)
+_MAX_WRITE_FILE_BYTES = _read_positive_int_env(
+    "SHIPYARD_MAX_WRITE_FILE_BYTES", 5 * 1024 * 1024
+)
 _SDK_CALL_TIMEOUT = _read_positive_int_env("SHIPYARD_SDK_CALL_TIMEOUT", 600)
 
 # Sandbox ID format: alphanumeric + hyphens + underscores, 1-128 chars
@@ -142,7 +144,9 @@ def _read_exec_type(arguments: dict[str, Any], key: str = "exec_type") -> str | 
     if not isinstance(value, str):
         raise ValueError(f"field '{key}' must be a string")
     if value not in {"python", "shell", "browser", "browser_batch"}:
-        raise ValueError(f"field '{key}' must be one of: python, shell, browser, browser_batch")
+        raise ValueError(
+            f"field '{key}' must be one of: python, shell, browser, browser_batch"
+        )
     return value
 
 
@@ -187,7 +191,9 @@ def _cache_sandbox(sandbox: Any) -> None:
     _sandboxes[sandbox_id] = sandbox
     while len(_sandboxes) > _MAX_SANDBOX_CACHE_SIZE:
         evicted_id, _ = _sandboxes.popitem(last=False)
-        logger.debug("cache_evict sandbox_id=%s cache_size=%d", evicted_id, len(_sandboxes))
+        logger.debug(
+            "cache_evict sandbox_id=%s cache_size=%d", evicted_id, len(_sandboxes)
+        )
 
 
 def _format_bay_error(error: BayError) -> str:
@@ -472,7 +478,10 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "sandbox_id": {"type": "string", "description": "The sandbox ID."},
-                    "execution_id": {"type": "string", "description": "Execution record ID."},
+                    "execution_id": {
+                        "type": "string",
+                        "description": "Execution record ID.",
+                    },
                 },
                 "required": ["sandbox_id", "execution_id"],
             },
@@ -499,8 +508,14 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "sandbox_id": {"type": "string", "description": "The sandbox ID."},
-                    "execution_id": {"type": "string", "description": "Execution record ID."},
-                    "description": {"type": "string", "description": "Description text."},
+                    "execution_id": {
+                        "type": "string",
+                        "description": "Execution record ID.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description text.",
+                    },
                     "tags": {"type": "string", "description": "Comma-separated tags."},
                     "notes": {"type": "string", "description": "Agent notes."},
                 },
@@ -519,8 +534,14 @@ async def list_tools() -> list[Tool]:
                         "items": {"type": "string"},
                         "description": "Execution IDs used as source evidence.",
                     },
-                    "scenario_key": {"type": "string", "description": "Optional scenario key."},
-                    "payload_ref": {"type": "string", "description": "Optional payload reference."},
+                    "scenario_key": {
+                        "type": "string",
+                        "description": "Optional scenario key.",
+                    },
+                    "payload_ref": {
+                        "type": "string",
+                        "description": "Optional payload reference.",
+                    },
                 },
                 "required": ["skill_key", "source_execution_ids"],
             },
@@ -531,11 +552,26 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "candidate_id": {"type": "string", "description": "Skill candidate ID."},
-                    "passed": {"type": "boolean", "description": "Whether evaluation passed."},
-                    "score": {"type": "number", "description": "Optional evaluation score."},
-                    "benchmark_id": {"type": "string", "description": "Optional benchmark ID."},
-                    "report": {"type": "string", "description": "Optional evaluation report."},
+                    "candidate_id": {
+                        "type": "string",
+                        "description": "Skill candidate ID.",
+                    },
+                    "passed": {
+                        "type": "boolean",
+                        "description": "Whether evaluation passed.",
+                    },
+                    "score": {
+                        "type": "number",
+                        "description": "Optional evaluation score.",
+                    },
+                    "benchmark_id": {
+                        "type": "string",
+                        "description": "Optional benchmark ID.",
+                    },
+                    "report": {
+                        "type": "string",
+                        "description": "Optional evaluation report.",
+                    },
                 },
                 "required": ["candidate_id", "passed"],
             },
@@ -546,7 +582,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "candidate_id": {"type": "string", "description": "Skill candidate ID."},
+                    "candidate_id": {
+                        "type": "string",
+                        "description": "Skill candidate ID.",
+                    },
                     "stage": {
                         "type": "string",
                         "description": "Release stage: canary or stable. Defaults to canary.",
@@ -561,10 +600,22 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "status": {"type": "string", "description": "Optional status filter."},
-                    "skill_key": {"type": "string", "description": "Optional skill key filter."},
-                    "limit": {"type": "integer", "description": "Max items. Defaults to 50."},
-                    "offset": {"type": "integer", "description": "Offset. Defaults to 0."},
+                    "status": {
+                        "type": "string",
+                        "description": "Optional status filter.",
+                    },
+                    "skill_key": {
+                        "type": "string",
+                        "description": "Optional skill key filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max items. Defaults to 50.",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Offset. Defaults to 0.",
+                    },
                 },
                 "required": [],
             },
@@ -575,11 +626,26 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "skill_key": {"type": "string", "description": "Optional skill key filter."},
-                    "active_only": {"type": "boolean", "description": "Only active releases."},
-                    "stage": {"type": "string", "description": "Optional stage filter."},
-                    "limit": {"type": "integer", "description": "Max items. Defaults to 50."},
-                    "offset": {"type": "integer", "description": "Offset. Defaults to 0."},
+                    "skill_key": {
+                        "type": "string",
+                        "description": "Optional skill key filter.",
+                    },
+                    "active_only": {
+                        "type": "boolean",
+                        "description": "Only active releases.",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Optional stage filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max items. Defaults to 50.",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Offset. Defaults to 0.",
+                    },
                 },
                 "required": [],
             },
@@ -590,7 +656,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "release_id": {"type": "string", "description": "Release ID to rollback from."},
+                    "release_id": {
+                        "type": "string",
+                        "description": "Release ID to rollback from.",
+                    },
                 },
                 "required": ["release_id"],
             },
@@ -723,7 +792,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
             logger.info(
                 "sandbox_created sandbox_id=%s profile=%s ttl=%d",
-                sandbox.id, sandbox.profile, ttl,
+                sandbox.id,
+                sandbox.profile,
+                ttl,
             )
 
             return [
@@ -1090,7 +1161,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             releases = await _client.skills.list_releases(
                 skill_key=_optional_str(arguments, "skill_key"),
                 active_only=_read_bool(arguments, "active_only", False),
-                stage=_read_release_stage(arguments, key="stage", required=False, default=None),
+                stage=_read_release_stage(
+                    arguments, key="stage", required=False, default=None
+                ),
                 limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
                 offset=_read_int(arguments, "offset", 0, min_value=0),
             )
@@ -1168,9 +1241,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     f"(exit={step.exit_code}, {step.duration_ms}ms)"
                 )
                 if step.stdout.strip():
-                    lines.append(f"   stdout: {_truncate_text(step.stdout.strip(), limit=500)}")
+                    lines.append(
+                        f"   stdout: {_truncate_text(step.stdout.strip(), limit=500)}"
+                    )
                 if step.stderr.strip():
-                    lines.append(f"   stderr: {_truncate_text(step.stderr.strip(), limit=500)}")
+                    lines.append(
+                        f"   stderr: {_truncate_text(step.stderr.strip(), limit=500)}"
+                    )
 
             return [TextContent(type="text", text="\n".join(lines))]
 
@@ -1191,9 +1268,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 if p.containers:
                     for c in p.containers:
                         c_caps = ", ".join(c.capabilities) if c.capabilities else "none"
-                        lines.append(
-                            f"    └ {c.name} ({c.runtime_type}): [{c_caps}]"
-                        )
+                        lines.append(f"    └ {c.name} ({c.runtime_type}): [{c_caps}]")
 
             return [TextContent(type="text", text="\n".join(lines))]
 

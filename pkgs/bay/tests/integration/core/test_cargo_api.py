@@ -54,9 +54,7 @@ async def create_cargo(
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
 
-    resp = await client.post(
-        "/v1/cargos", json=body, headers=headers, timeout=DEFAULT_TIMEOUT
-    )
+    resp = await client.post("/v1/cargos", json=body, headers=headers, timeout=DEFAULT_TIMEOUT)
     assert resp.status_code == 201, f"Create cargo failed: {resp.text}"
     cargo = resp.json()
 
@@ -87,9 +85,7 @@ async def create_cargo(
 
 async def test_create_cargo_returns_valid_response():
     """Create external cargo returns required fields with correct format."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_cargo(client) as cargo:
             assert cargo["id"].startswith("ws-")
             assert cargo["managed"] is False
@@ -102,9 +98,7 @@ async def test_create_cargo_returns_valid_response():
 
 async def test_create_cargo_with_custom_size():
     """Create cargo with custom size_limit_mb."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_cargo(client, size_limit_mb=2048) as cargo:
             assert cargo["size_limit_mb"] == 2048
 
@@ -113,9 +107,7 @@ async def test_create_cargo_idempotency():
     """Create cargo with Idempotency-Key returns same result on retry (D4)."""
     import uuid
 
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Use UUID to ensure uniqueness across parallel test runs
         idempotency_key = f"test-cargo-idem-{uuid.uuid4().hex}"
 
@@ -143,16 +135,12 @@ async def test_create_cargo_idempotency():
         assert cargo1["id"] == cargo2["id"]
 
         # Cleanup
-        await client.delete(
-            f"/v1/cargos/{cargo1['id']}", timeout=CLEANUP_TIMEOUT
-        )
+        await client.delete(f"/v1/cargos/{cargo1['id']}", timeout=CLEANUP_TIMEOUT)
 
 
 async def test_create_cargo_size_limit_validation():
     """size_limit_mb must be in range 1-65536 (D5)."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Too small
         resp = await client.post(
             "/v1/cargos",
@@ -177,9 +165,7 @@ async def test_create_cargo_size_limit_validation():
 
 async def test_list_cargos_default_returns_external_only():
     """GET /v1/cargos defaults to external cargos only (D1)."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create an external cargo
         async with create_cargo(client) as ext_cargo:
             # Create a sandbox (creates managed cargo)
@@ -199,16 +185,12 @@ async def test_list_cargos_default_returns_external_only():
 
 async def test_list_cargos_managed_filter():
     """GET /v1/cargos?managed=true shows managed cargos (D1)."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             managed_cargo_id = sandbox["cargo_id"]
 
             # List with managed=true
-            resp = await client.get(
-                "/v1/cargos?managed=true", timeout=DEFAULT_TIMEOUT
-            )
+            resp = await client.get("/v1/cargos?managed=true", timeout=DEFAULT_TIMEOUT)
             assert resp.status_code == 200
             data = resp.json()
 
@@ -222,23 +204,17 @@ async def test_list_cargos_managed_filter():
 
 async def test_list_cargos_pagination():
     """List cargos supports pagination."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create multiple cargos
         cargos = []
         for _ in range(3):
-            resp = await client.post(
-                "/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT
-            )
+            resp = await client.post("/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT)
             assert resp.status_code == 201
             cargos.append(resp.json())
 
         try:
             # List with limit=2
-            resp = await client.get(
-                "/v1/cargos?limit=2", timeout=DEFAULT_TIMEOUT
-            )
+            resp = await client.get("/v1/cargos?limit=2", timeout=DEFAULT_TIMEOUT)
             assert resp.status_code == 200
             data = resp.json()
 
@@ -248,9 +224,7 @@ async def test_list_cargos_pagination():
         finally:
             # Cleanup
             for cargo in cargos:
-                await client.delete(
-                    f"/v1/cargos/{cargo['id']}", timeout=CLEANUP_TIMEOUT
-                )
+                await client.delete(f"/v1/cargos/{cargo['id']}", timeout=CLEANUP_TIMEOUT)
 
 
 # =============================================================================
@@ -260,13 +234,9 @@ async def test_list_cargos_pagination():
 
 async def test_get_cargo_returns_details():
     """GET /v1/cargos/{id} returns cargo details."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_cargo(client, size_limit_mb=512) as cargo:
-            resp = await client.get(
-                f"/v1/cargos/{cargo['id']}", timeout=DEFAULT_TIMEOUT
-            )
+            resp = await client.get(f"/v1/cargos/{cargo['id']}", timeout=DEFAULT_TIMEOUT)
             assert resp.status_code == 200
             data = resp.json()
 
@@ -277,12 +247,8 @@ async def test_get_cargo_returns_details():
 
 async def test_get_cargo_not_found():
     """GET /v1/cargos/{id} returns 404 for non-existent cargo."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
-        resp = await client.get(
-            "/v1/cargos/ws-nonexistent", timeout=DEFAULT_TIMEOUT
-        )
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        resp = await client.get("/v1/cargos/ws-nonexistent", timeout=DEFAULT_TIMEOUT)
         assert resp.status_code == 404
 
 
@@ -293,13 +259,9 @@ async def test_get_cargo_not_found():
 
 async def test_delete_external_cargo_success():
     """DELETE /v1/cargos/{id} succeeds for unreferenced external cargo."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create cargo (not using context manager)
-        resp = await client.post(
-            "/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT
-        )
+        resp = await client.post("/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT)
         assert resp.status_code == 201
         cargo = resp.json()
         cargo_id = cargo["id"]
@@ -308,9 +270,7 @@ async def test_delete_external_cargo_success():
         assert cargo_volume_exists(cargo_id)
 
         # Delete
-        resp = await client.delete(
-            f"/v1/cargos/{cargo_id}", timeout=CLEANUP_TIMEOUT
-        )
+        resp = await client.delete(f"/v1/cargos/{cargo_id}", timeout=CLEANUP_TIMEOUT)
         assert resp.status_code == 204
 
         # In K8s, PVC deletion may have a brief delay. Poll with retries.
@@ -319,16 +279,12 @@ async def test_delete_external_cargo_success():
                 break
             await asyncio.sleep(1.0)
         else:
-            raise AssertionError(
-                f"Volume for cargo {cargo_id} should be deleted"
-            )
+            raise AssertionError(f"Volume for cargo {cargo_id} should be deleted")
 
 
 async def test_delete_external_cargo_referenced_by_active_sandbox():
     """DELETE /v1/cargos/{id} returns 409 when referenced by active sandbox (D3)."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create external cargo
         async with create_cargo(client) as cargo:
             cargo_id = cargo["id"]
@@ -344,34 +300,24 @@ async def test_delete_external_cargo_referenced_by_active_sandbox():
 
             try:
                 # Try to delete cargo - should fail with 409
-                resp = await client.delete(
-                    f"/v1/cargos/{cargo_id}", timeout=DEFAULT_TIMEOUT
-                )
+                resp = await client.delete(f"/v1/cargos/{cargo_id}", timeout=DEFAULT_TIMEOUT)
                 assert resp.status_code == 409
 
                 # Verify error has active_sandbox_ids
                 error = resp.json()
-                assert "active_sandbox_ids" in error.get("error", {}).get(
-                    "details", {}
-                )
+                assert "active_sandbox_ids" in error.get("error", {}).get("details", {})
                 assert sandbox["id"] in error["error"]["details"]["active_sandbox_ids"]
 
             finally:
                 # Cleanup sandbox
-                await client.delete(
-                    f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT
-                )
+                await client.delete(f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT)
 
 
 async def test_delete_external_cargo_after_sandbox_deleted():
     """DELETE /v1/cargos/{id} succeeds after referencing sandbox is deleted."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create external cargo
-        resp = await client.post(
-            "/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT
-        )
+        resp = await client.post("/v1/cargos", json={}, timeout=DEFAULT_TIMEOUT)
         assert resp.status_code == 201
         cargo = resp.json()
         cargo_id = cargo["id"]
@@ -386,15 +332,11 @@ async def test_delete_external_cargo_after_sandbox_deleted():
         sandbox = resp.json()
 
         # Delete sandbox
-        resp = await client.delete(
-            f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT
-        )
+        resp = await client.delete(f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT)
         assert resp.status_code == 204
 
         # Now cargo can be deleted
-        resp = await client.delete(
-            f"/v1/cargos/{cargo_id}", timeout=CLEANUP_TIMEOUT
-        )
+        resp = await client.delete(f"/v1/cargos/{cargo_id}", timeout=CLEANUP_TIMEOUT)
         assert resp.status_code == 204
 
 
@@ -405,16 +347,12 @@ async def test_delete_external_cargo_after_sandbox_deleted():
 
 async def test_delete_managed_cargo_active_sandbox_returns_409():
     """DELETE /v1/cargos/{id} returns 409 for managed cargo with active sandbox."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             managed_cargo_id = sandbox["cargo_id"]
 
             # Try to delete managed cargo - should fail
-            resp = await client.delete(
-                f"/v1/cargos/{managed_cargo_id}", timeout=DEFAULT_TIMEOUT
-            )
+            resp = await client.delete(f"/v1/cargos/{managed_cargo_id}", timeout=DEFAULT_TIMEOUT)
             assert resp.status_code == 409
 
 
@@ -432,9 +370,7 @@ async def test_delete_managed_cargo_active_sandbox_returns_409():
 
 async def test_sandbox_with_external_cargo():
     """Create sandbox binding external cargo works correctly."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_cargo(client) as cargo:
             # Create sandbox with this cargo
             resp = await client.post(
@@ -457,6 +393,4 @@ async def test_sandbox_with_external_cargo():
                 assert exec_resp.status_code == 200
 
             finally:
-                await client.delete(
-                    f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT
-                )
+                await client.delete(f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT)

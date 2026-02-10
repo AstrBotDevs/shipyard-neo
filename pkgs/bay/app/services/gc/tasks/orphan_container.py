@@ -181,9 +181,7 @@ class OrphanContainerGC(GCTask):
             return False
 
         # Query DB to check if session exists
-        db_result = await self._db.execute(
-            select(Session.id).where(Session.id == session_id)
-        )
+        db_result = await self._db.execute(select(Session.id).where(Session.id == session_id))
         session_exists = db_result.scalars().first() is not None
 
         if session_exists:

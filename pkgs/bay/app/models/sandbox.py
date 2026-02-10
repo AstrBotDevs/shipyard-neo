@@ -43,9 +43,7 @@ class Sandbox(SQLModel, table=True):
     # Note: cargo_id can become NULL after sandbox is soft-deleted and
     # its managed cargo is cascade-deleted. For active sandboxes (deleted_at IS NULL),
     # cargo_id is guaranteed to be set at creation time.
-    cargo_id: Optional[str] = Field(
-        default=None, foreign_key="cargos.id", index=True
-    )
+    cargo_id: Optional[str] = Field(default=None, foreign_key="cargos.id", index=True)
 
     # Current session (single session for Phase 1)
     current_session_id: Optional[str] = Field(default=None, index=True)

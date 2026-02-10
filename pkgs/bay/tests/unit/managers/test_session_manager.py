@@ -226,17 +226,22 @@ class TestSessionManagerHealthProbing:
         await db_session.commit()
 
         # Create the container in FakeDriver state so status() returns RUNNING
-        driver._containers["fake-container-1"] = type(driver._containers.get("x", None)).__class__(
-            container_id="fake-container-1",
-            session_id=session.id,
-            profile_id=profile.id,
-            cargo_id=cargo.id,
-            status=ContainerStatus.RUNNING,
-            endpoint="http://fake-host:8123",
-        ) if driver._containers else None
+        driver._containers["fake-container-1"] = (
+            type(driver._containers.get("x", None)).__class__(
+                container_id="fake-container-1",
+                session_id=session.id,
+                profile_id=profile.id,
+                cargo_id=cargo.id,
+                status=ContainerStatus.RUNNING,
+                endpoint="http://fake-host:8123",
+            )
+            if driver._containers
+            else None
+        )
 
         # Manually add container state
         from tests.fakes import FakeContainerState
+
         driver._containers["fake-container-1"] = FakeContainerState(
             container_id="fake-container-1",
             session_id=session.id,
@@ -409,6 +414,7 @@ class TestSessionManagerHealthProbing:
 
         # Also need to set is_ready properly - create a container state
         from tests.fakes import FakeContainerState
+
         driver._containers["unreachable-container-1"] = FakeContainerState(
             container_id="unreachable-container-1",
             session_id=session.id,

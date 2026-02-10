@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
+
 @dataclass(frozen=True, slots=True)
 class SandboxListItem:
     sandbox: Sandbox
@@ -283,9 +284,7 @@ class SandboxManager:
             # Re-fetch sandbox from DB with fresh transaction to see committed changes
             # FOR UPDATE works in PostgreSQL/MySQL for multi-instance deployments
             result = await self._db.execute(
-                select(Sandbox)
-                .where(Sandbox.id == sandbox_id)
-                .with_for_update()
+                select(Sandbox).where(Sandbox.id == sandbox_id).with_for_update()
             )
             locked_sandbox = result.scalars().first()
             if locked_sandbox is None:
@@ -411,9 +410,7 @@ class SandboxManager:
 
         profile = self._settings.get_profile(sandbox.profile_id)
         if profile:
-            sandbox.idle_expires_at = datetime.utcnow() + timedelta(
-                seconds=profile.idle_timeout
-            )
+            sandbox.idle_expires_at = datetime.utcnow() + timedelta(seconds=profile.idle_timeout)
 
         sandbox.last_active_at = datetime.utcnow()
         await self._db.commit()
@@ -437,9 +434,7 @@ class SandboxManager:
             await self._db.rollback()
 
             result = await self._db.execute(
-                select(Sandbox)
-                .where(Sandbox.id == sandbox_id)
-                .with_for_update()
+                select(Sandbox).where(Sandbox.id == sandbox_id).with_for_update()
             )
             locked_sandbox = result.scalars().first()
 
@@ -484,9 +479,7 @@ class SandboxManager:
             await self._db.rollback()
 
             result = await self._db.execute(
-                select(Sandbox)
-                .where(Sandbox.id == sandbox_id)
-                .with_for_update()
+                select(Sandbox).where(Sandbox.id == sandbox_id).with_for_update()
             )
             locked_sandbox = result.scalars().first()
 

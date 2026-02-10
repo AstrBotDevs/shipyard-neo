@@ -87,7 +87,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 async def _init_kernel_matplotlib(km: AsyncKernelManager):
     """初始化内核的 matplotlib 配置
-    
+
     执行静态初始化代码来配置中文字体等。
     工作目录已在 start_kernel(cwd=...) 时设置。
     """
@@ -95,7 +95,7 @@ async def _init_kernel_matplotlib(km: AsyncKernelManager):
     try:
         # 执行静态初始化代码（不包含任何动态内容）
         kc.execute(_KERNEL_INIT_CODE, silent=True, store_history=False)
-        
+
         # 等待执行完成
         timeout = 10
         while True:
@@ -212,7 +212,7 @@ async def get_kernel_status():
     """获取内核状态"""
     try:
         global _kernel_manager
-        
+
         if _kernel_manager is None:
             return KernelStatusResponse(
                 status="not_started",
@@ -245,14 +245,14 @@ async def restart_kernel():
     """重启内核"""
     try:
         global _kernel_manager
-        
+
         if _kernel_manager is not None:
             await _kernel_manager.shutdown_kernel()
             _kernel_manager = None
-        
+
         # 创建新的内核
         await get_or_create_kernel()
-        
+
         return {
             "success": True,
             "message": "Kernel restarted successfully",
@@ -268,11 +268,9 @@ async def shutdown_kernel():
     """关闭内核"""
     try:
         global _kernel_manager
-        
+
         if _kernel_manager is None:
-            raise HTTPException(
-                status_code=404, detail="Kernel not found"
-            )
+            raise HTTPException(status_code=404, detail="Kernel not found")
 
         await _kernel_manager.shutdown_kernel()
         _kernel_manager = None

@@ -116,9 +116,7 @@ class CargoManager:
 
     async def get_by_id(self, cargo_id: str) -> Cargo | None:
         """Get cargo by ID (internal use, no owner check)."""
-        result = await self._db.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await self._db.execute(select(Cargo).where(Cargo.id == cargo_id))
         return result.scalars().first()
 
     async def list(
@@ -170,7 +168,7 @@ class CargoManager:
         force: bool = False,
     ) -> None:
         """Delete a cargo.
-        
+
         For external cargos (managed=false):
         - Cannot delete if still referenced by active sandboxes (deleted_at IS NULL)
         - Returns 409 with active_sandbox_ids if referenced
@@ -181,12 +179,12 @@ class CargoManager:
           - If managed_by_sandbox_id is None: allow delete (orphan cargo)
           - If managing sandbox doesn't exist or is soft-deleted: allow delete
           - Otherwise: return 409
-        
+
         Args:
             cargo_id: Cargo ID
             owner: Owner identifier
             force: If True, skip all checks (for cascade delete)
-            
+
         Raises:
             NotFoundError: If cargo not found
             ConflictError: If cargo still in use or managed by active sandbox
@@ -203,7 +201,7 @@ class CargoManager:
                     )
                 )
                 active_sandbox_ids = [row[0] for row in result.fetchall()]
-                
+
                 if active_sandbox_ids:
                     raise ConflictError(
                         f"Cannot delete cargo {cargo_id}: still referenced by active sandboxes",
@@ -217,7 +215,7 @@ class CargoManager:
                         select(Sandbox).where(Sandbox.id == cargo.managed_by_sandbox_id)
                     )
                     managing_sandbox = result.scalars().first()
-                    
+
                     if managing_sandbox is not None and managing_sandbox.deleted_at is None:
                         # Managing sandbox is still active
                         raise ConflictError(
@@ -245,9 +243,7 @@ class CargoManager:
 
     async def touch(self, cargo_id: str) -> None:
         """Update last_accessed_at timestamp."""
-        result = await self._db.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await self._db.execute(select(Cargo).where(Cargo.id == cargo_id))
         cargo = result.scalars().first()
 
         if cargo:

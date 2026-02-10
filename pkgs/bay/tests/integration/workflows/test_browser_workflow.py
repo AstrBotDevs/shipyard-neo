@@ -59,10 +59,10 @@ async def _wait_until_http_ok(
             f"/v1/sandboxes/{sandbox_id}/shell/exec",
             json={
                 "command": (
-                    "python -c \"import urllib.request; "
+                    'python -c "import urllib.request; '
                     "import sys; "
                     "u=sys.argv[1]; "
-                    "print(urllib.request.urlopen(u, timeout=2).status)\" "
+                    'print(urllib.request.urlopen(u, timeout=2).status)" '
                     f"{url}"
                 ),
                 "timeout": 10,

@@ -86,9 +86,14 @@ def gull_container():
     # Start container
     result = subprocess.run(
         [
-            "docker", "run", "--rm", "-d",
-            "--name", GULL_CONTAINER_NAME,
-            "-p", f"{GULL_HOST_PORT}:8080",
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "--name",
+            GULL_CONTAINER_NAME,
+            "-p",
+            f"{GULL_HOST_PORT}:8080",
             GULL_IMAGE,
         ],
         capture_output=True,

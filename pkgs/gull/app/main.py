@@ -39,12 +39,16 @@ GULL_VERSION = "0.1.0"
 
 class ExecRequest(BaseModel):
     """Request to execute an agent-browser command."""
-    cmd: str = Field(..., description="agent-browser command (without 'agent-browser' prefix)")
+
+    cmd: str = Field(
+        ..., description="agent-browser command (without 'agent-browser' prefix)"
+    )
     timeout: int = Field(default=30, description="Timeout in seconds", ge=1, le=300)
 
 
 class ExecResponse(BaseModel):
     """Response from command execution."""
+
     stdout: str
     stderr: str
     exit_code: int
@@ -52,13 +56,19 @@ class ExecResponse(BaseModel):
 
 class BatchExecRequest(BaseModel):
     """Request to execute a batch of agent-browser commands."""
-    commands: list[str] = Field(..., min_length=1, description="List of commands (without agent-browser prefix)")
-    timeout: int = Field(default=60, ge=1, le=600, description="Overall timeout (seconds)")
+
+    commands: list[str] = Field(
+        ..., min_length=1, description="List of commands (without agent-browser prefix)"
+    )
+    timeout: int = Field(
+        default=60, ge=1, le=600, description="Overall timeout (seconds)"
+    )
     stop_on_error: bool = Field(default=True, description="Stop if a command fails")
 
 
 class BatchStepResult(BaseModel):
     """Result of a single step in a batch."""
+
     cmd: str
     stdout: str
     stderr: str
@@ -69,6 +79,7 @@ class BatchStepResult(BaseModel):
 
 class BatchExecResponse(BaseModel):
     """Response from batch command execution."""
+
     results: list[BatchStepResult]
     total_steps: int
     completed_steps: int
@@ -78,6 +89,7 @@ class BatchExecResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str  # healthy | degraded | unhealthy
     browser_active: bool
     session: str
@@ -85,6 +97,7 @@ class HealthResponse(BaseModel):
 
 class MetaResponse(BaseModel):
     """Runtime metadata response."""
+
     runtime: dict
     workspace: dict
     capabilities: dict
@@ -260,14 +273,16 @@ async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
         )
         step_duration_ms = int((time.perf_counter() - step_start) * 1000)
 
-        results.append(BatchStepResult(
-            cmd=cmd,
-            stdout=stdout,
-            stderr=stderr,
-            exit_code=exit_code,
-            step_index=i,
-            duration_ms=step_duration_ms,
-        ))
+        results.append(
+            BatchStepResult(
+                cmd=cmd,
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=exit_code,
+                step_index=i,
+                duration_ms=step_duration_ms,
+            )
+        )
 
         if request.stop_on_error and exit_code != 0:
             break

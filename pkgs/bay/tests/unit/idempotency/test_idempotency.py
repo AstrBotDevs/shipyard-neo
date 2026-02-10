@@ -82,9 +82,7 @@ class TestFingerprintComputation:
         fp1 = IdempotencyService.compute_fingerprint(
             "/v1/sandboxes", "POST", '{"profile":"python"}'
         )
-        fp2 = IdempotencyService.compute_fingerprint(
-            "/v1/sandboxes", "POST", '{"profile":"data"}'
-        )
+        fp2 = IdempotencyService.compute_fingerprint("/v1/sandboxes", "POST", '{"profile":"data"}')
         assert fp1 != fp2
 
     def test_fingerprint_different_path(self):
@@ -92,9 +90,7 @@ class TestFingerprintComputation:
         fp1 = IdempotencyService.compute_fingerprint(
             "/v1/sandboxes", "POST", '{"profile":"python"}'
         )
-        fp2 = IdempotencyService.compute_fingerprint(
-            "/v1/other", "POST", '{"profile":"python"}'
-        )
+        fp2 = IdempotencyService.compute_fingerprint("/v1/other", "POST", '{"profile":"python"}')
         assert fp1 != fp2
 
     def test_fingerprint_different_method(self):
@@ -102,16 +98,12 @@ class TestFingerprintComputation:
         fp1 = IdempotencyService.compute_fingerprint(
             "/v1/sandboxes", "POST", '{"profile":"python"}'
         )
-        fp2 = IdempotencyService.compute_fingerprint(
-            "/v1/sandboxes", "PUT", '{"profile":"python"}'
-        )
+        fp2 = IdempotencyService.compute_fingerprint("/v1/sandboxes", "PUT", '{"profile":"python"}')
         assert fp1 != fp2
 
     def test_fingerprint_is_sha256(self):
         """Fingerprint is 64 character hex string (SHA256)."""
-        fp = IdempotencyService.compute_fingerprint(
-            "/v1/sandboxes", "POST", "{}"
-        )
+        fp = IdempotencyService.compute_fingerprint("/v1/sandboxes", "POST", "{}")
         assert len(fp) == 64
         assert all(c in "0123456789abcdef" for c in fp)
 
@@ -214,9 +206,7 @@ class TestIdempotencyServiceCheck:
         self, service: IdempotencyService, db_session: AsyncSession
     ):
         """Expired key is deleted and returns None."""
-        fingerprint = IdempotencyService.compute_fingerprint(
-            "/v1/sandboxes", "POST", "{}"
-        )
+        fingerprint = IdempotencyService.compute_fingerprint("/v1/sandboxes", "POST", "{}")
         record = IdempotencyKey(
             owner="user1",
             key="expired-key",
@@ -241,9 +231,7 @@ class TestIdempotencyServiceCheck:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_check_raises_conflict_for_invalid_key_format(
-        self, service: IdempotencyService
-    ):
+    async def test_check_raises_conflict_for_invalid_key_format(self, service: IdempotencyService):
         """Invalid key format raises ConflictError."""
         with pytest.raises(ConflictError) as exc_info:
             await service.check(
@@ -261,9 +249,7 @@ class TestIdempotencyServiceCheck:
         self, service: IdempotencyService, db_session: AsyncSession
     ):
         """Keys are isolated by owner."""
-        fingerprint = IdempotencyService.compute_fingerprint(
-            "/v1/sandboxes", "POST", "{}"
-        )
+        fingerprint = IdempotencyService.compute_fingerprint("/v1/sandboxes", "POST", "{}")
         # Insert record for user1
         record = IdempotencyKey(
             owner="user1",
@@ -303,9 +289,7 @@ class TestIdempotencyServiceSave:
         return IdempotencyService(db_session=db_session, config=config)
 
     @pytest.mark.asyncio
-    async def test_save_creates_record(
-        self, service: IdempotencyService, db_session: AsyncSession
-    ):
+    async def test_save_creates_record(self, service: IdempotencyService, db_session: AsyncSession):
         """Save creates a new idempotency record."""
         await service.save(
             owner="user1",
@@ -399,16 +383,12 @@ class TestIdempotencyServiceDisabled:
         return IdempotencyConfig(enabled=False, ttl_hours=1)
 
     @pytest.fixture
-    def disabled_service(
-        self, db_session: AsyncSession, disabled_config: IdempotencyConfig
-    ):
+    def disabled_service(self, db_session: AsyncSession, disabled_config: IdempotencyConfig):
         """Create disabled service."""
         return IdempotencyService(db_session=db_session, config=disabled_config)
 
     @pytest.mark.asyncio
-    async def test_check_returns_none_when_disabled(
-        self, disabled_service: IdempotencyService
-    ):
+    async def test_check_returns_none_when_disabled(self, disabled_service: IdempotencyService):
         """Check returns None when disabled."""
         result = await disabled_service.check(
             owner="user1",

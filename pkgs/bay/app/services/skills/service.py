@@ -173,11 +173,7 @@ class SkillLifecycleService:
         normalized_tags = self._normalize_tags(tags)
         if normalized_tags:
             tag_list = normalized_tags.split(",")
-            filters.append(
-                or_(
-                    *[ExecutionHistory.tags.ilike(f"%{tag}%") for tag in tag_list]
-                )
-            )
+            filters.append(or_(*[ExecutionHistory.tags.ilike(f"%{tag}%") for tag in tag_list]))
 
         where_clause = and_(*filters)
 

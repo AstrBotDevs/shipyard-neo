@@ -25,7 +25,7 @@ logger = structlog.get_logger()
 
 def _get_shared_client() -> httpx.AsyncClient | None:
     """Get shared HTTP client if available.
-    
+
     Returns None if client manager is not initialized (e.g., in tests).
     """
     try:
@@ -261,7 +261,7 @@ class ShipAdapter(BaseAdapter):
         try:
             files = {"file": ("file", content, "application/octet-stream")}
             data = {"file_path": path}
-            
+
             client = _get_shared_client()
             if client is not None:
                 response = await client.post(
@@ -279,7 +279,7 @@ class ShipAdapter(BaseAdapter):
                         data=data,
                         timeout=self._timeout,
                     )
-            
+
             if response.status_code >= 400:
                 raise ShipError(f"Upload failed: {response.status_code}")
         except httpx.RequestError as e:
@@ -303,7 +303,7 @@ class ShipAdapter(BaseAdapter):
                         params={"file_path": path},
                         timeout=self._timeout,
                     )
-            
+
             if response.status_code == 404:
                 raise CargoFileNotFoundError(f"File not found: {path}")
             if response.status_code >= 400:

@@ -61,9 +61,7 @@ class TestAuthenticateAnonymousMode:
 
     def test_valid_api_key_returns_default(self):
         """Valid API key returns 'default' owner."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer test-key"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer test-key"})
         settings = create_mock_settings(api_key="test-key", allow_anonymous=True)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):
@@ -73,9 +71,7 @@ class TestAuthenticateAnonymousMode:
 
     def test_invalid_api_key_raises_401(self):
         """Invalid API key raises UnauthorizedError even in anonymous mode."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer wrong-key"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer wrong-key"})
         settings = create_mock_settings(api_key="test-key", allow_anonymous=True)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):
@@ -86,9 +82,7 @@ class TestAuthenticateAnonymousMode:
 
     def test_any_token_accepted_without_api_key(self):
         """Any Bearer token is accepted when api_key is not configured."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer any-random-token"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer any-random-token"})
         settings = create_mock_settings(api_key=None, allow_anonymous=True)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):
@@ -158,9 +152,7 @@ class TestAuthenticateStrictMode:
 
     def test_valid_api_key_returns_default(self):
         """Valid API key returns 'default' owner in strict mode."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer secret-key"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer secret-key"})
         settings = create_mock_settings(api_key="secret-key", allow_anonymous=False)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):
@@ -170,9 +162,7 @@ class TestAuthenticateStrictMode:
 
     def test_invalid_api_key_raises_401(self):
         """Invalid API key raises UnauthorizedError in strict mode."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer wrong-key"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer wrong-key"})
         settings = create_mock_settings(api_key="secret-key", allow_anonymous=False)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):
@@ -183,9 +173,7 @@ class TestAuthenticateStrictMode:
 
     def test_token_without_api_key_configured_raises_401(self):
         """Bearer token raises 401 when api_key not configured and anonymous disabled."""
-        request = create_mock_request(
-            headers={"Authorization": "Bearer some-token"}
-        )
+        request = create_mock_request(headers={"Authorization": "Bearer some-token"})
         settings = create_mock_settings(api_key=None, allow_anonymous=False)
 
         with patch("app.api.dependencies.get_settings", return_value=settings):

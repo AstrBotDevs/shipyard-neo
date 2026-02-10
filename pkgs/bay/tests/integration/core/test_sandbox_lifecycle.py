@@ -83,9 +83,7 @@ async def test_stop_preserves_cargo():
             )
 
             # Stop
-            stop_resp = await client.post(
-                f"/v1/sandboxes/{sandbox_id}/stop", timeout=60.0
-            )
+            stop_resp = await client.post(f"/v1/sandboxes/{sandbox_id}/stop", timeout=60.0)
             assert stop_resp.status_code == 200
 
             # Verify idle status, same cargo
@@ -105,9 +103,7 @@ async def test_stop_is_idempotent():
             sandbox_id = sandbox["id"]
 
             for _ in range(3):
-                resp = await client.post(
-                    f"/v1/sandboxes/{sandbox_id}/stop", timeout=60.0
-                )
+                resp = await client.post(f"/v1/sandboxes/{sandbox_id}/stop", timeout=60.0)
                 assert resp.status_code == 200
 
 
@@ -135,9 +131,7 @@ async def test_delete_returns_404_after():
         )
 
         # Delete
-        del_resp = await client.delete(
-            f"/v1/sandboxes/{sandbox_id}", timeout=120.0
-        )
+        del_resp = await client.delete(f"/v1/sandboxes/{sandbox_id}", timeout=120.0)
         assert del_resp.status_code == 204
 
         # Get should return 404
@@ -173,6 +167,4 @@ async def test_delete_removes_managed_cargo_volume():
                 break
             await asyncio.sleep(1.0)
         else:
-            raise AssertionError(
-                f"Volume for cargo {cargo_id} should be deleted"
-            )
+            raise AssertionError(f"Volume for cargo {cargo_id} should be deleted")

@@ -4,6 +4,7 @@ End-to-end tests for Ship API.
 These tests run against an actual running Ship container.
 Use the `run_e2e_tests.sh` script to start a container and run these tests.
 """
+
 import pytest
 import requests
 
@@ -61,15 +62,14 @@ class TestFilesystemAPI:
         # Create file
         response = requests.post(
             f"{api_url}/fs/create_file",
-            json={"path": "e2e_test.txt", "content": "E2E Test Content", "mode": 0o644}
+            json={"path": "e2e_test.txt", "content": "E2E Test Content", "mode": 0o644},
         )
         assert response.status_code == 200
         assert response.json()["success"] is True
 
         # Read file
         response = requests.post(
-            f"{api_url}/fs/read_file",
-            json={"path": "e2e_test.txt"}
+            f"{api_url}/fs/read_file", json={"path": "e2e_test.txt"}
         )
         assert response.status_code == 200
         assert response.json()["content"] == "E2E Test Content"
@@ -78,7 +78,7 @@ class TestFilesystemAPI:
         """Test writing to a file"""
         response = requests.post(
             f"{api_url}/fs/write_file",
-            json={"path": "write_test.txt", "content": "Written via API", "mode": "w"}
+            json={"path": "write_test.txt", "content": "Written via API", "mode": "w"},
         )
         assert response.status_code == 200
         assert response.json()["success"] is True
@@ -88,13 +88,11 @@ class TestFilesystemAPI:
         # Create some files first
         for name in ["list_test_1.txt", "list_test_2.txt"]:
             requests.post(
-                f"{api_url}/fs/create_file",
-                json={"path": name, "content": "test"}
+                f"{api_url}/fs/create_file", json={"path": name, "content": "test"}
             )
 
         response = requests.post(
-            f"{api_url}/fs/list_dir",
-            json={"path": ".", "show_hidden": False}
+            f"{api_url}/fs/list_dir", json={"path": ".", "show_hidden": False}
         )
         assert response.status_code == 200
         data = response.json()
@@ -107,28 +105,25 @@ class TestFilesystemAPI:
         # Create file
         requests.post(
             f"{api_url}/fs/create_file",
-            json={"path": "to_delete.txt", "content": "delete me"}
+            json={"path": "to_delete.txt", "content": "delete me"},
         )
 
         # Delete file
         response = requests.post(
-            f"{api_url}/fs/delete_file",
-            json={"path": "to_delete.txt"}
+            f"{api_url}/fs/delete_file", json={"path": "to_delete.txt"}
         )
         assert response.status_code == 200
 
         # Verify deleted
         response = requests.post(
-            f"{api_url}/fs/read_file",
-            json={"path": "to_delete.txt"}
+            f"{api_url}/fs/read_file", json={"path": "to_delete.txt"}
         )
         assert response.status_code == 404
 
     def test_path_traversal_blocked(self, api_url):
         """Test that path traversal is blocked"""
         response = requests.post(
-            f"{api_url}/fs/read_file",
-            json={"path": "../../../etc/passwd"}
+            f"{api_url}/fs/read_file", json={"path": "../../../etc/passwd"}
         )
         assert response.status_code == 403
 
@@ -140,7 +135,7 @@ class TestShellAPI:
         """Test executing a simple shell command"""
         response = requests.post(
             f"{api_url}/shell/exec",
-            json={"command": 'echo "Hello from shell"', "timeout": 10}
+            json={"command": 'echo "Hello from shell"', "timeout": 10},
         )
         assert response.status_code == 200
         data = response.json()
@@ -151,14 +146,11 @@ class TestShellAPI:
     def test_execute_with_cwd(self, api_url):
         """Test executing command in specific directory"""
         # Create a subdirectory first
-        requests.post(
-            f"{api_url}/shell/exec",
-            json={"command": "mkdir -p test_subdir"}
-        )
+        requests.post(f"{api_url}/shell/exec", json={"command": "mkdir -p test_subdir"})
 
         response = requests.post(
             f"{api_url}/shell/exec",
-            json={"command": "pwd", "cwd": "test_subdir", "timeout": 10}
+            json={"command": "pwd", "cwd": "test_subdir", "timeout": 10},
         )
         assert response.status_code == 200
         data = response.json()
@@ -172,8 +164,8 @@ class TestShellAPI:
             json={
                 "command": 'echo "VAR=$MY_VAR"',
                 "env": {"MY_VAR": "test_value"},
-                "timeout": 10
-            }
+                "timeout": 10,
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -184,10 +176,7 @@ class TestShellAPI:
         """Test running a background process"""
         response = requests.post(
             f"{api_url}/shell/exec",
-            json={
-                "command": "sleep 3 && echo done > bg_test.txt",
-                "background": True
-            }
+            json={"command": "sleep 3 && echo done > bg_test.txt", "background": True},
         )
         assert response.status_code == 200
         data = response.json()
@@ -209,7 +198,7 @@ class TestIPythonAPI:
         """Test executing simple Python code"""
         response = requests.post(
             f"{api_url}/ipython/exec",
-            json={"code": "print('Hello from IPython')", "timeout": 30}
+            json={"code": "print('Hello from IPython')", "timeout": 30},
         )
         assert response.status_code == 200
         data = response.json()
@@ -219,8 +208,7 @@ class TestIPythonAPI:
     def test_execute_with_return_value(self, api_url):
         """Test executing code with return value"""
         response = requests.post(
-            f"{api_url}/ipython/exec",
-            json={"code": "1 + 2 + 3", "timeout": 30}
+            f"{api_url}/ipython/exec", json={"code": "1 + 2 + 3", "timeout": 30}
         )
         assert response.status_code == 200
         data = response.json()
@@ -231,16 +219,14 @@ class TestIPythonAPI:
         """Test that kernel state persists between calls"""
         # Define variable
         response = requests.post(
-            f"{api_url}/ipython/exec",
-            json={"code": "x = 42", "timeout": 30}
+            f"{api_url}/ipython/exec", json={"code": "x = 42", "timeout": 30}
         )
         assert response.status_code == 200
         assert response.json()["success"] is True
 
         # Use variable
         response = requests.post(
-            f"{api_url}/ipython/exec",
-            json={"code": "print(f'x = {x}')", "timeout": 30}
+            f"{api_url}/ipython/exec", json={"code": "print(f'x = {x}')", "timeout": 30}
         )
         assert response.status_code == 200
         data = response.json()
@@ -250,10 +236,7 @@ class TestIPythonAPI:
     def test_kernel_status(self, api_url):
         """Test kernel status endpoint"""
         # First execute something to ensure kernel exists
-        requests.post(
-            f"{api_url}/ipython/exec",
-            json={"code": "1+1", "timeout": 30}
-        )
+        requests.post(f"{api_url}/ipython/exec", json={"code": "1+1", "timeout": 30})
 
         response = requests.get(f"{api_url}/ipython/kernel/status")
         assert response.status_code == 200
@@ -265,7 +248,7 @@ class TestIPythonAPI:
         """Test executing code that produces an error"""
         response = requests.post(
             f"{api_url}/ipython/exec",
-            json={"code": "undefined_variable", "timeout": 30}
+            json={"code": "undefined_variable", "timeout": 30},
         )
         assert response.status_code == 200
         data = response.json()
@@ -277,7 +260,7 @@ class TestIPythonAPI:
         # First set a variable
         response = requests.post(
             f"{api_url}/ipython/exec",
-            json={"code": "test_var = 'before_restart'", "timeout": 30}
+            json={"code": "test_var = 'before_restart'", "timeout": 30},
         )
         assert response.status_code == 200
 
@@ -288,8 +271,7 @@ class TestIPythonAPI:
 
         # Verify variable is gone (new kernel)
         response = requests.post(
-            f"{api_url}/ipython/exec",
-            json={"code": "test_var", "timeout": 30}
+            f"{api_url}/ipython/exec", json={"code": "test_var", "timeout": 30}
         )
         assert response.status_code == 200
         data = response.json()
@@ -304,9 +286,7 @@ class TestUploadDownloadAPI:
         """Test file upload"""
         files = {"file": ("upload_test.txt", b"Uploaded content", "text/plain")}
         response = requests.post(
-            f"{api_url}/fs/upload",
-            files=files,
-            data={"file_path": "uploaded_file.txt"}
+            f"{api_url}/fs/upload", files=files, data={"file_path": "uploaded_file.txt"}
         )
         assert response.status_code == 200
         data = response.json()
@@ -318,12 +298,11 @@ class TestUploadDownloadAPI:
         # Create a file first
         requests.post(
             f"{api_url}/fs/create_file",
-            json={"path": "download_test.txt", "content": "Download me!"}
+            json={"path": "download_test.txt", "content": "Download me!"},
         )
 
         response = requests.get(
-            f"{api_url}/fs/download",
-            params={"file_path": "download_test.txt"}
+            f"{api_url}/fs/download", params={"file_path": "download_test.txt"}
         )
         assert response.status_code == 200
         assert response.content == b"Download me!"
@@ -337,7 +316,10 @@ class TestCrossComponentIntegration:
         # Create file with Python
         response = requests.post(
             f"{api_url}/ipython/exec",
-            json={"code": "open('py_created.txt', 'w').write('From Python')", "timeout": 30}
+            json={
+                "code": "open('py_created.txt', 'w').write('From Python')",
+                "timeout": 30,
+            },
         )
         assert response.status_code == 200
         assert response.json()["success"] is True
@@ -345,7 +327,7 @@ class TestCrossComponentIntegration:
         # Read with shell
         response = requests.post(
             f"{api_url}/shell/exec",
-            json={"command": "cat py_created.txt", "timeout": 10}
+            json={"command": "cat py_created.txt", "timeout": 10},
         )
         assert response.status_code == 200
         data = response.json()
@@ -357,14 +339,13 @@ class TestCrossComponentIntegration:
         # Create file with shell
         response = requests.post(
             f"{api_url}/shell/exec",
-            json={"command": 'echo "From Shell" > shell_created.txt', "timeout": 10}
+            json={"command": 'echo "From Shell" > shell_created.txt', "timeout": 10},
         )
         assert response.status_code == 200
 
         # Read with filesystem API
         response = requests.post(
-            f"{api_url}/fs/read_file",
-            json={"path": "shell_created.txt"}
+            f"{api_url}/fs/read_file", json={"path": "shell_created.txt"}
         )
         assert response.status_code == 200
         assert "From Shell" in response.json()["content"]

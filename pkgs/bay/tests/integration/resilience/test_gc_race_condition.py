@@ -76,7 +76,10 @@ class TestGCRaceCondition:
                             json={"code": "print('after_expiry')", "timeout": 30},
                             timeout=60.0,
                         )
-                        return {"status": resp.status_code, "body": resp.json() if resp.status_code == 200 else resp.text}
+                        return {
+                            "status": resp.status_code,
+                            "body": resp.json() if resp.status_code == 200 else resp.text,
+                        }
                     except Exception as e:
                         return {"error": str(e)}
 
@@ -110,9 +113,7 @@ class TestGCRaceCondition:
                     ), f"Unexpected status: {data}"
                 else:
                     # Any other status code is unexpected
-                    raise AssertionError(
-                        f"Unexpected status code: {final_status.status_code}"
-                    )
+                    raise AssertionError(f"Unexpected status code: {final_status.status_code}")
 
             finally:
                 # Cleanup (best effort)

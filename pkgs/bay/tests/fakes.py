@@ -114,12 +114,14 @@ class FakeDriver(Driver):
             status=ContainerStatus.CREATED,
         )
 
-        self.create_calls.append({
-            "session_id": session.id,
-            "profile_id": profile.id,
-            "cargo_id": cargo.id,
-            "labels": labels,
-        })
+        self.create_calls.append(
+            {
+                "session_id": session.id,
+                "profile_id": profile.id,
+                "cargo_id": cargo.id,
+                "labels": labels,
+            }
+        )
 
         return container_id
 
@@ -132,10 +134,12 @@ class FakeDriver(Driver):
         container.status = ContainerStatus.RUNNING
         container.endpoint = f"http://fake-host:{runtime_port}"
 
-        self.start_calls.append({
-            "container_id": container_id,
-            "runtime_port": runtime_port,
-        })
+        self.start_calls.append(
+            {
+                "container_id": container_id,
+                "runtime_port": runtime_port,
+            }
+        )
 
         return container.endpoint
 
@@ -160,10 +164,12 @@ class FakeDriver(Driver):
         Phase 1.5: Supports override and exception injection for testing probes.
         """
         # Track the call for assertions
-        self.status_calls.append({
-            "container_id": container_id,
-            "runtime_port": runtime_port,
-        })
+        self.status_calls.append(
+            {
+                "container_id": container_id,
+                "runtime_port": runtime_port,
+            }
+        )
 
         # Check for exception injection (simulate Docker daemon unreachable)
         if self._status_exception is not None:
@@ -195,10 +201,12 @@ class FakeDriver(Driver):
         """Create a fake volume."""
         self._volumes[name] = FakeVolumeState(name=name, labels=labels or {})
 
-        self.create_volume_calls.append({
-            "name": name,
-            "labels": labels,
-        })
+        self.create_volume_calls.append(
+            {
+                "name": name,
+                "labels": labels,
+            }
+        )
 
         return name
 
@@ -215,9 +223,7 @@ class FakeDriver(Driver):
 
     # GC-related methods
 
-    async def list_runtime_instances(
-        self, *, labels: dict[str, str]
-    ) -> list[RuntimeInstance]:
+    async def list_runtime_instances(self, *, labels: dict[str, str]) -> list[RuntimeInstance]:
         """List fake runtime instances matching labels."""
         instances = []
         for container_id, state in self._containers.items():
@@ -290,12 +296,14 @@ class FakeDriver(Driver):
         """Create multiple fake containers."""
         self.__init_multi()
 
-        self.create_multi_calls.append({
-            "session_id": session.id,
-            "profile_id": profile.id,
-            "cargo_id": cargo.id,
-            "network_name": network_name,
-        })
+        self.create_multi_calls.append(
+            {
+                "session_id": session.id,
+                "profile_id": profile.id,
+                "cargo_id": cargo.id,
+                "network_name": network_name,
+            }
+        )
 
         results: list[MultiContainerInfo] = []
         for spec in profile.get_containers():
@@ -305,9 +313,7 @@ class FakeDriver(Driver):
                 for created in results:
                     if created.container_id in self._containers:
                         del self._containers[created.container_id]
-                raise RuntimeError(
-                    f"Fake: create_multi failed on container '{spec.name}'"
-                )
+                raise RuntimeError(f"Fake: create_multi failed on container '{spec.name}'")
 
             container_id = f"fake-container-{self._next_container_id}"
             self._next_container_id += 1

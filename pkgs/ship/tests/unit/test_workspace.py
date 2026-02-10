@@ -1,6 +1,7 @@
 """
 Unit tests for workspace module.
 """
+
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,10 +19,10 @@ class TestResolvePathUnit:
         """Test resolving a relative path within workspace"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             # Create a test file
             (tmp_path / "test.txt").touch()
-            
+
             result = resolve_path("test.txt")
             assert result == tmp_path / "test.txt"
 
@@ -29,11 +30,11 @@ class TestResolvePathUnit:
         """Test resolving nested relative path"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             # Create nested directory
             (tmp_path / "subdir").mkdir()
             (tmp_path / "subdir" / "file.txt").touch()
-            
+
             result = resolve_path("subdir/file.txt")
             assert result == tmp_path / "subdir" / "file.txt"
 
@@ -41,9 +42,9 @@ class TestResolvePathUnit:
         """Test resolving absolute path that is within workspace"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             (tmp_path / "test.txt").touch()
-            
+
             result = resolve_path(str(tmp_path / "test.txt"))
             assert result == tmp_path / "test.txt"
 
@@ -51,10 +52,10 @@ class TestResolvePathUnit:
         """Test that paths outside workspace are rejected"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             with pytest.raises(HTTPException) as exc_info:
                 resolve_path("/etc/passwd")
-            
+
             assert exc_info.value.status_code == 403
             assert "Access denied" in exc_info.value.detail
 
@@ -62,17 +63,17 @@ class TestResolvePathUnit:
         """Test that path traversal attacks are rejected"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             with pytest.raises(HTTPException) as exc_info:
                 resolve_path("../../../etc/passwd")
-            
+
             assert exc_info.value.status_code == 403
 
     def test_resolve_dot_path(self, tmp_path):
         """Test resolving current directory path"""
         with patch("app.workspace.WORKSPACE_ROOT", tmp_path):
             from app.workspace import resolve_path
-            
+
             result = resolve_path(".")
             assert result == tmp_path
 
@@ -85,7 +86,7 @@ class TestGetWorkspaceDir:
         workspace = tmp_path / "workspace"
         with patch("app.workspace.WORKSPACE_ROOT", workspace):
             from app.workspace import get_workspace_dir
-            
+
             result = get_workspace_dir()
             assert result == workspace
             assert workspace.exists()
@@ -94,9 +95,9 @@ class TestGetWorkspaceDir:
         """Test that existing workspace directory is returned"""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        
+
         with patch("app.workspace.WORKSPACE_ROOT", workspace):
             from app.workspace import get_workspace_dir
-            
+
             result = get_workspace_dir()
             assert result == workspace

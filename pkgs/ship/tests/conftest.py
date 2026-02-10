@@ -30,7 +30,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def base_url() -> str:
     """
     Get the base URL for e2e tests.
-    
+
     Uses SHIP_BASE_URL environment variable if set,
     otherwise defaults to http://127.0.0.1:18123
     """
@@ -41,7 +41,7 @@ def base_url() -> str:
 def ws_base_url(base_url: str) -> str:
     """
     Get the WebSocket base URL for e2e tests.
-    
+
     Converts http:// to ws:// and https:// to wss://
     """
     if base_url.startswith("https://"):

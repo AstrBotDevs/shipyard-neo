@@ -112,10 +112,7 @@ class TestIdleSessionGC:
                 assert data["idle_expires_at"] is None
 
                 # 5) Invariant: compute can be recreated and /workspace persists.
-                code = (
-                    "import json; "
-                    "print(json.loads(open('data/result.json').read())['ok'])"
-                )
+                code = "import json; print(json.loads(open('data/result.json').read())['ok'])"
                 exec2 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
                     json={

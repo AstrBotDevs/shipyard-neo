@@ -31,11 +31,7 @@ class TestDockerDriverEndpointResolution:
                         "IPAddress": "172.18.0.5",
                     }
                 },
-                "Ports": {
-                    "8123/tcp": [
-                        {"HostIp": "0.0.0.0", "HostPort": "32768"}
-                    ]
-                },
+                "Ports": {"8123/tcp": [{"HostIp": "0.0.0.0", "HostPort": "32768"}]},
             },
         }
 
@@ -48,11 +44,7 @@ class TestDockerDriverEndpointResolution:
             "State": {"Status": "running"},
             "NetworkSettings": {
                 "Networks": {},
-                "Ports": {
-                    "8123/tcp": [
-                        {"HostIp": "0.0.0.0", "HostPort": "32769"}
-                    ]
-                },
+                "Ports": {"8123/tcp": [{"HostIp": "0.0.0.0", "HostPort": "32769"}]},
             },
         }
 
@@ -183,11 +175,7 @@ class TestDockerDriverEndpointResolution:
 
         container_info = {
             "NetworkSettings": {
-                "Ports": {
-                    "8123/tcp": [
-                        {"HostIp": "0.0.0.0", "HostPort": "invalid"}
-                    ]
-                },
+                "Ports": {"8123/tcp": [{"HostIp": "0.0.0.0", "HostPort": "invalid"}]},
             },
         }
 
@@ -207,11 +195,7 @@ class TestDockerDriverEndpointResolution:
 
         container_info = {
             "NetworkSettings": {
-                "Ports": {
-                    "8123/tcp": [
-                        {"HostIp": "0.0.0.0", "HostPort": ""}
-                    ]
-                },
+                "Ports": {"8123/tcp": [{"HostIp": "0.0.0.0", "HostPort": ""}]},
             },
         }
 

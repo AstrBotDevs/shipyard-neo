@@ -330,10 +330,18 @@ class TestSessionContainersField:
             id="sess-1",
             sandbox_id="sbx-1",
             containers=[
-                {"name": "ship", "container_id": "c1", "endpoint": "http://ship:8123",
-                 "capabilities": ["python", "shell", "filesystem"]},
-                {"name": "gull", "container_id": "c2", "endpoint": "http://gull:8080",
-                 "capabilities": ["browser"]},
+                {
+                    "name": "ship",
+                    "container_id": "c1",
+                    "endpoint": "http://ship:8123",
+                    "capabilities": ["python", "shell", "filesystem"],
+                },
+                {
+                    "name": "gull",
+                    "container_id": "c2",
+                    "endpoint": "http://gull:8080",
+                    "capabilities": ["browser"],
+                },
             ],
         )
 

@@ -310,9 +310,7 @@ class GCConfig(BaseModel):
     expired_sandbox: GCTaskConfig = Field(default_factory=GCTaskConfig)
     orphan_cargo: GCTaskConfig = Field(default_factory=GCTaskConfig)
     # OrphanContainerGC is disabled by default due to strict safety requirements
-    orphan_container: GCTaskConfig = Field(
-        default_factory=lambda: GCTaskConfig(enabled=False)
-    )
+    orphan_container: GCTaskConfig = Field(default_factory=lambda: GCTaskConfig(enabled=False))
 
     def get_instance_id(self) -> str:
         """Get resolved instance_id with fallback logic."""

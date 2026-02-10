@@ -106,7 +106,7 @@ class TestCargoManagerCreate:
         assert cargo.managed is False
         assert cargo.managed_by_sandbox_id is None
         assert cargo.backend == "docker_volume"
-        
+
         # Assert volume was created
         assert len(fake_driver.create_volume_calls) == 1
 
@@ -293,9 +293,7 @@ class TestCargoManagerDelete:
         await cargo_manager.delete(cargo_id, owner="test-user")
 
         # Assert - cargo gone
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo_id))
         assert result.scalars().first() is None
 
         # Assert - volume deleted
@@ -309,7 +307,7 @@ class TestCargoManagerDelete:
         """Delete external cargo referenced by active sandbox raises ConflictError (D3)."""
         # Arrange - create external cargo
         cargo = await cargo_manager.create(owner="test-user", managed=False)
-        
+
         # Create an active sandbox referencing this cargo
         sandbox = Sandbox(
             id="sandbox-test-123",
@@ -324,7 +322,7 @@ class TestCargoManagerDelete:
         # Act & Assert
         with pytest.raises(ConflictError) as exc_info:
             await cargo_manager.delete(cargo.id, owner="test-user")
-        
+
         # Verify error contains active_sandbox_ids
         assert "active_sandbox_ids" in exc_info.value.details
         assert "sandbox-test-123" in exc_info.value.details["active_sandbox_ids"]
@@ -337,7 +335,7 @@ class TestCargoManagerDelete:
         """Delete external cargo succeeds after referencing sandbox is soft-deleted."""
         # Arrange
         cargo = await cargo_manager.create(owner="test-user", managed=False)
-        
+
         # Create a soft-deleted sandbox
         sandbox = Sandbox(
             id="sandbox-deleted-123",
@@ -353,9 +351,7 @@ class TestCargoManagerDelete:
         await cargo_manager.delete(cargo.id, owner="test-user")
 
         # Assert - cargo deleted
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo.id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo.id))
         assert result.scalars().first() is None
 
     async def test_delete_managed_cargo_with_active_sandbox_raises_409(
@@ -370,7 +366,7 @@ class TestCargoManagerDelete:
             managed=True,
             managed_by_sandbox_id="sandbox-active",
         )
-        
+
         # Create the managing sandbox (active)
         sandbox = Sandbox(
             id="sandbox-active",
@@ -398,7 +394,7 @@ class TestCargoManagerDelete:
             managed=True,
             managed_by_sandbox_id="sandbox-softdel",
         )
-        
+
         # Create soft-deleted managing sandbox
         sandbox = Sandbox(
             id="sandbox-softdel",
@@ -414,9 +410,7 @@ class TestCargoManagerDelete:
         await cargo_manager.delete(cargo.id, owner="test-user")
 
         # Assert
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo.id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo.id))
         assert result.scalars().first() is None
 
     async def test_delete_managed_cargo_orphan(
@@ -436,9 +430,7 @@ class TestCargoManagerDelete:
         await cargo_manager.delete(cargo.id, owner="test-user")
 
         # Assert
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo.id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo.id))
         assert result.scalars().first() is None
 
     async def test_delete_managed_cargo_force_bypasses_check(
@@ -453,7 +445,7 @@ class TestCargoManagerDelete:
             managed=True,
             managed_by_sandbox_id="sandbox-active",
         )
-        
+
         # Create active managing sandbox
         sandbox = Sandbox(
             id="sandbox-active",
@@ -469,9 +461,7 @@ class TestCargoManagerDelete:
         await cargo_manager.delete(cargo.id, owner="test-user", force=True)
 
         # Assert - deleted despite active sandbox
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo.id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo.id))
         assert result.scalars().first() is None
 
 
@@ -502,8 +492,6 @@ class TestCargoManagerDeleteInternal:
         await cargo_manager.delete_internal_by_id(cargo_id)
 
         # Assert
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo_id))
         assert result.scalars().first() is None
         assert len(fake_driver.delete_volume_calls) == 1

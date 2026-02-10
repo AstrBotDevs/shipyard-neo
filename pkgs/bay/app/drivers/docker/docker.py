@@ -452,9 +452,7 @@ class DockerDriver(Driver):
 
     # Runtime instance discovery (for GC)
 
-    async def list_runtime_instances(
-        self, *, labels: dict[str, str]
-    ) -> list[RuntimeInstance]:
+    async def list_runtime_instances(self, *, labels: dict[str, str]) -> list[RuntimeInstance]:
         """List containers matching labels.
 
         Used by OrphanContainerGC to discover containers that may be orphaned.
@@ -786,9 +784,7 @@ class DockerDriver(Driver):
                 if connect_bay_network:
                     try:
                         bay_net = await client.networks.get(self._network)
-                        await bay_net.connect(
-                            {"Container": container.id}
-                        )
+                        await bay_net.connect({"Container": container.id})
                         self._log.debug(
                             "docker.create_multi.connected_bay_network",
                             container_name=container_name,

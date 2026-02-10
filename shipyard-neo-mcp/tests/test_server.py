@@ -415,7 +415,9 @@ async def test_get_execution_history_empty_message():
     mcp_server._sandboxes["sbx-1"] = EmptyHistorySandbox()
     mcp_server._client = FakeClient()
 
-    response = await mcp_server.call_tool("get_execution_history", {"sandbox_id": "sbx-1"})
+    response = await mcp_server.call_tool(
+        "get_execution_history", {"sandbox_id": "sbx-1"}
+    )
     assert response[0].text == "No execution history found."
 
 
@@ -612,7 +614,11 @@ async def test_execute_browser_custom_timeout():
 
     await mcp_server.call_tool(
         "execute_browser",
-        {"sandbox_id": "sbx-1", "cmd": "screenshot /workspace/page.png", "timeout": 120},
+        {
+            "sandbox_id": "sbx-1",
+            "cmd": "screenshot /workspace/page.png",
+            "timeout": 120,
+        },
     )
 
     assert fake_sandbox.browser.calls[0]["timeout"] == 120
@@ -647,9 +653,7 @@ async def test_execute_browser_batch_formats_success():
 @pytest.mark.asyncio
 async def test_execute_browser_batch_with_failure():
     class PartialFailBrowserCapability(FakeBrowserCapability):
-        async def exec_batch(
-            self, commands, *, timeout=60, stop_on_error=True
-        ):
+        async def exec_batch(self, commands, *, timeout=60, stop_on_error=True):
             return SimpleNamespace(
                 results=[
                     SimpleNamespace(
@@ -846,10 +850,12 @@ async def test_write_file_accepts_content_within_limit(monkeypatch):
 @pytest.mark.asyncio
 async def test_timeout_error_returns_friendly_message():
     """TimeoutError from SDK calls should return a friendly message."""
+
     class TimeoutSandbox(FakeSandbox):
         class TimeoutPython:
             async def exec(self, *_args, **_kwargs):
                 raise TimeoutError("timed out")
+
         def __init__(self):
             super().__init__()
             self.python = self.TimeoutPython()
@@ -924,9 +930,7 @@ async def test_delete_sandbox_logs_info(caplog):
     mcp_server._client = FakeClient()
 
     with caplog.at_level(logging.INFO, logger="shipyard_neo_mcp"):
-        response = await mcp_server.call_tool(
-            "delete_sandbox", {"sandbox_id": "sbx-1"}
-        )
+        response = await mcp_server.call_tool("delete_sandbox", {"sandbox_id": "sbx-1"})
 
     assert "sandbox_deleted" in caplog.text
     assert "sbx-1" in caplog.text

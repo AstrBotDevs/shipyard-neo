@@ -132,9 +132,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session_dependency)]
 SandboxManagerDep = Annotated[SandboxManager, Depends(get_sandbox_manager)]
 CargoManagerDep = Annotated[CargoManager, Depends(get_cargo_manager)]
 IdempotencyServiceDep = Annotated[IdempotencyService, Depends(get_idempotency_service)]
-SkillLifecycleServiceDep = Annotated[
-    SkillLifecycleService, Depends(get_skill_lifecycle_service)
-]
+SkillLifecycleServiceDep = Annotated[SkillLifecycleService, Depends(get_skill_lifecycle_service)]
 AuthDep = Annotated[str, Depends(authenticate)]
 
 

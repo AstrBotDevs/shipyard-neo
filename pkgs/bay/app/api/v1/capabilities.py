@@ -378,12 +378,8 @@ async def exec_browser_batch(
 
     # Record as single execution history entry
     combined_code = "\n".join(request.commands)
-    combined_output = "\n".join(
-        r.stdout.strip() for r in results if r.stdout.strip()
-    )
-    combined_error = "\n".join(
-        r.stderr.strip() for r in results if r.stderr.strip()
-    ) or None
+    combined_output = "\n".join(r.stdout.strip() for r in results if r.stdout.strip())
+    combined_error = "\n".join(r.stderr.strip() for r in results if r.stderr.strip()) or None
 
     current_session = await sandbox_mgr.get_current_session(sandbox)
     await skill_svc.create_execution(

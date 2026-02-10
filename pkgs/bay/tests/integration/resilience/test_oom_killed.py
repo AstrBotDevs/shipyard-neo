@@ -111,9 +111,7 @@ print(f'Allocated {len(big_list)} MB')
                         result = exec_resp.json()
                         # Either execution failed or Python caught MemoryError
                         if result.get("success"):
-                            pytest.skip(
-                                "OOM not triggered - memory limit may be too high"
-                            )
+                            pytest.skip("OOM not triggered - memory limit may be too high")
                         else:
                             # Execution failed, which is expected
                             pass

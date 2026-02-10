@@ -49,7 +49,7 @@ E2E_K8S_NAMESPACE = os.environ.get("E2E_K8S_NAMESPACE", "bay-e2e-test")
 # Docker operations (create/delete container/volume) can be slow under load
 DEFAULT_TIMEOUT = 30.0  # Default timeout for most operations
 CLEANUP_TIMEOUT = 60.0  # Longer timeout for cleanup (delete) operations
-EXEC_TIMEOUT = 120.0    # Timeout for code execution
+EXEC_TIMEOUT = 120.0  # Timeout for code execution
 
 
 # =============================================================================
@@ -101,8 +101,7 @@ SERIAL_GROUPS = {
 }
 
 _COMPILED_GROUPS: dict[str, list[re.Pattern]] = {
-    group: [re.compile(p) for p in patterns]
-    for group, patterns in SERIAL_GROUPS.items()
+    group: [re.compile(p) for p in patterns] for group, patterns in SERIAL_GROUPS.items()
 }
 
 
@@ -137,6 +136,7 @@ def pytest_collection_modifyitems(config: Config, items: list[Function]) -> None
 # ENVIRONMENT CHECKS
 # =============================================================================
 
+
 def _check_docker() -> bool:
     try:
         return subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0
@@ -146,10 +146,12 @@ def _check_docker() -> bool:
 
 def _check_ship_image() -> bool:
     try:
-        return subprocess.run(
-            ["docker", "image", "inspect", "ship:latest"],
-            capture_output=True, timeout=5
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", "ship:latest"], capture_output=True, timeout=5
+            ).returncode
+            == 0
+        )
     except Exception:
         return False
 
@@ -174,22 +176,27 @@ pytestmark = e2e_skipif_marks
 # DOCKER HELPERS
 # =============================================================================
 
+
 def docker_volume_exists(name: str) -> bool:
     try:
-        return subprocess.run(
-            ["docker", "volume", "inspect", name],
-            capture_output=True, timeout=5
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["docker", "volume", "inspect", name], capture_output=True, timeout=5
+            ).returncode
+            == 0
+        )
     except Exception:
         return False
 
 
 def docker_container_exists(name: str) -> bool:
     try:
-        return subprocess.run(
-            ["docker", "container", "inspect", name],
-            capture_output=True, timeout=5
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["docker", "container", "inspect", name], capture_output=True, timeout=5
+            ).returncode
+            == 0
+        )
     except Exception:
         return False
 
@@ -198,28 +205,38 @@ def docker_container_exists(name: str) -> bool:
 # K8S HELPERS
 # =============================================================================
 
+
 def k8s_pvc_exists(name: str, namespace: str | None = None) -> bool:
     """Check if a PersistentVolumeClaim exists in K8s."""
     ns = namespace or E2E_K8S_NAMESPACE
     try:
-        return subprocess.run(
-            ["kubectl", "get", "pvc", name, "-n", ns],
-            capture_output=True, timeout=10
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["kubectl", "get", "pvc", name, "-n", ns], capture_output=True, timeout=10
+            ).returncode
+            == 0
+        )
     except Exception:
         return False
 
 
-def k8s_get_pod_by_label(label_key: str, label_value: str, namespace: str | None = None) -> str | None:
+def k8s_get_pod_by_label(
+    label_key: str, label_value: str, namespace: str | None = None
+) -> str | None:
     """Get Pod name by label. Returns first matching pod name or None."""
     ns = namespace or E2E_K8S_NAMESPACE
     try:
         result = subprocess.run(
             [
-                "kubectl", "get", "pods",
-                "-n", ns,
-                "-l", f"{label_key}={label_value}",
-                "-o", "jsonpath={.items[0].metadata.name}",
+                "kubectl",
+                "get",
+                "pods",
+                "-n",
+                ns,
+                "-l",
+                f"{label_key}={label_value}",
+                "-o",
+                "jsonpath={.items[0].metadata.name}",
             ],
             capture_output=True,
             timeout=10,
@@ -250,9 +267,14 @@ def k8s_get_pod_exit_code(pod_name: str, namespace: str | None = None) -> int | 
     try:
         result = subprocess.run(
             [
-                "kubectl", "get", "pod", pod_name,
-                "-n", ns,
-                "-o", "jsonpath={.status.containerStatuses[0].state.terminated.exitCode}",
+                "kubectl",
+                "get",
+                "pod",
+                pod_name,
+                "-n",
+                ns,
+                "-o",
+                "jsonpath={.status.containerStatuses[0].state.terminated.exitCode}",
             ],
             capture_output=True,
             timeout=10,
@@ -295,20 +317,21 @@ def k8s_get_pod_uid(pod_name: str, namespace: str | None = None) -> str | None:
 # UNIFIED STORAGE HELPERS
 # =============================================================================
 
+
 def cargo_volume_exists(cargo_id: str) -> bool:
     """Check if a cargo's underlying volume/PVC exists.
-    
+
     Automatically detects driver type from E2E_DRIVER_TYPE environment variable
     and uses appropriate check method.
-    
+
     Args:
         cargo_id: The cargo ID (e.g., 'ws-abc123')
-    
+
     Returns:
         True if the volume/PVC exists, False otherwise
     """
     volume_name = f"bay-cargo-{cargo_id}"
-    
+
     if E2E_DRIVER_TYPE == "k8s":
         return k8s_pvc_exists(volume_name)
     else:
@@ -319,9 +342,10 @@ def cargo_volume_exists(cargo_id: str) -> bool:
 # UNIFIED CONTAINER/POD HELPERS
 # =============================================================================
 
+
 def get_runtime_id_by_sandbox(sandbox_id: str) -> str | None:
     """Get container ID (Docker) or Pod name (K8s) for a sandbox.
-    
+
     Returns the first matching runtime instance or None if not found.
     """
     if E2E_DRIVER_TYPE == "k8s":
@@ -331,8 +355,11 @@ def get_runtime_id_by_sandbox(sandbox_id: str) -> str | None:
         try:
             result = subprocess.run(
                 [
-                    "docker", "ps", "-q",
-                    "--filter", f"label=bay.sandbox_id={sandbox_id}",
+                    "docker",
+                    "ps",
+                    "-q",
+                    "--filter",
+                    f"label=bay.sandbox_id={sandbox_id}",
                 ],
                 capture_output=True,
                 timeout=10,
@@ -347,7 +374,7 @@ def get_runtime_id_by_sandbox(sandbox_id: str) -> str | None:
 
 def kill_runtime(runtime_id: str) -> bool:
     """Force kill a container (Docker) or delete a Pod (K8s).
-    
+
     Returns True if the runtime was killed or is already dead/gone.
     In parallel test environments, the container may have already been
     removed by another test's cleanup or by Bay's health probing before
@@ -417,10 +444,10 @@ def get_runtime_identity(runtime_id: str) -> str | None:
     return runtime_id
 
 
-
 # =============================================================================
 # SANDBOX FIXTURES
 # =============================================================================
+
 
 @asynccontextmanager
 async def create_sandbox(
@@ -430,7 +457,7 @@ async def create_sandbox(
     ttl: int | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Create sandbox with auto-cleanup.
-    
+
     Cleanup uses a longer timeout to handle parallel test load.
     Timeout errors during cleanup are logged but not raised to avoid
     masking actual test failures.
@@ -454,6 +481,7 @@ async def create_sandbox(
         except httpx.TimeoutException:
             # Log but don't fail - cleanup will happen via GC or manual cleanup
             import warnings
+
             warnings.warn(
                 f"Timeout deleting sandbox {sandbox['id']} during cleanup. "
                 "Sandbox will be cleaned up by GC or manual cleanup script.",
@@ -473,6 +501,7 @@ async def create_sandbox(
 # =============================================================================
 # GC HELPERS
 # =============================================================================
+
 
 async def trigger_gc(
     client: httpx.AsyncClient,

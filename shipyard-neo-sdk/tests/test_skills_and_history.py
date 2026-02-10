@@ -118,7 +118,9 @@ class TestSkillsManagerAndHistory:
         assert params["has_description"] == "true"
 
     @pytest.mark.asyncio
-    async def test_python_exec_forwards_history_metadata_fields(self, httpx_mock, mock_sandbox_response):
+    async def test_python_exec_forwards_history_metadata_fields(
+        self, httpx_mock, mock_sandbox_response
+    ):
         """Python capability should send include_code/description/tags in request body."""
         httpx_mock.add_response(
             method="POST",
@@ -162,7 +164,9 @@ class TestSkillsManagerAndHistory:
         assert body["tags"] == "python,meta"
 
     @pytest.mark.asyncio
-    async def test_shell_exec_forwards_history_metadata_fields(self, httpx_mock, mock_sandbox_response):
+    async def test_shell_exec_forwards_history_metadata_fields(
+        self, httpx_mock, mock_sandbox_response
+    ):
         """Shell capability should send include_code/description/tags/cwd in request body."""
         httpx_mock.add_response(
             method="POST",

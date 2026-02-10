@@ -145,10 +145,7 @@ class SessionManager:
         """
         # Phase 1.5: Proactive health probing
         # If DB says RUNNING but container might be dead, probe before trusting
-        if (
-            session.container_id is not None
-            and session.observed_state == SessionStatus.RUNNING
-        ):
+        if session.container_id is not None and session.observed_state == SessionStatus.RUNNING:
             session = await self._probe_and_recover_if_dead(session, cargo, profile)
 
         # Already running and ready (after probe)

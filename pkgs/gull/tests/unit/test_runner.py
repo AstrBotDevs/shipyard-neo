@@ -36,7 +36,9 @@ class _FakeProcess:
 
 
 @pytest.mark.asyncio
-async def test_run_agent_browser_injects_session_and_profile(monkeypatch: pytest.MonkeyPatch):
+async def test_run_agent_browser_injects_session_and_profile(
+    monkeypatch: pytest.MonkeyPatch,
+):
     captured: dict[str, object] = {}
 
     async def fake_create_subprocess_exec(*args, **kwargs):
@@ -44,7 +46,9 @@ async def test_run_agent_browser_injects_session_and_profile(monkeypatch: pytest
         captured["kwargs"] = kwargs
         return _FakeProcess(b"out", b"err", 0)
 
-    monkeypatch.setattr(gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
 
     stdout, stderr, code = await gull_main._run_agent_browser(
         "open https://example.com",
@@ -78,7 +82,9 @@ async def test_run_agent_browser_preserves_quoted_args(monkeypatch: pytest.Monke
         captured_argv = list(args)
         return _FakeProcess(b"", b"", 0)
 
-    monkeypatch.setattr(gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
 
     await gull_main._run_agent_browser(
         'fill @e1 "hello world"',
@@ -103,7 +109,9 @@ async def test_run_agent_browser_timeout_kills_process(monkeypatch: pytest.Monke
     async def fake_create_subprocess_exec(*args, **kwargs):
         return _SlowProcess(b"", b"", 0)
 
-    monkeypatch.setattr(gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
 
     stdout, stderr, code = await gull_main._run_agent_browser(
         "snapshot -i",

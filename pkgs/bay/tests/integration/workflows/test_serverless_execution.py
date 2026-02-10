@@ -142,9 +142,7 @@ class TestServerlessExecutionWorkflow:
             )
             await asyncio.sleep(0.5)
 
-            delete_response = await client.delete(
-                f"/v1/sandboxes/{sandbox_id}", timeout=120.0
-            )
+            delete_response = await client.delete(f"/v1/sandboxes/{sandbox_id}", timeout=120.0)
             assert delete_response.status_code == 204
 
             # In K8s, PVC deletion may be delayed by the pvc-protection
@@ -154,9 +152,7 @@ class TestServerlessExecutionWorkflow:
                     break
                 await asyncio.sleep(1.0)
             else:
-                raise AssertionError(
-                    f"Volume for cargo {cargo_id} should be deleted after delete"
-                )
+                raise AssertionError(f"Volume for cargo {cargo_id} should be deleted after delete")
             get_response = await client.get(f"/v1/sandboxes/{sandbox_id}")
             assert get_response.status_code == 404
 

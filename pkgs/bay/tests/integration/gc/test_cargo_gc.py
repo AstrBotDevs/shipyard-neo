@@ -45,9 +45,7 @@ async def create_cargo(
     if size_limit_mb is not None:
         body["size_limit_mb"] = size_limit_mb
 
-    resp = await client.post(
-        "/v1/cargos", json=body, timeout=DEFAULT_TIMEOUT
-    )
+    resp = await client.post("/v1/cargos", json=body, timeout=DEFAULT_TIMEOUT)
     assert resp.status_code == 201, f"Create cargo failed: {resp.text}"
     cargo = resp.json()
 
@@ -81,14 +79,12 @@ def gc_completed_without_error(gc_result: dict) -> bool:
 
 async def test_gc_orphan_cargo_cleanup():
     """GC should clean up orphan managed cargos.
-    
+
     After sandbox delete (which cascade-deletes managed cargo),
     GC orphan_cargo task should run without error.
     This verifies GC idempotency.
     """
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create sandbox (creates managed cargo)
         resp = await client.post(
             "/v1/sandboxes",
@@ -100,9 +96,7 @@ async def test_gc_orphan_cargo_cleanup():
         sandbox_id = sandbox["id"]
 
         # Delete sandbox (cascade-deletes managed cargo)
-        resp = await client.delete(
-            f"/v1/sandboxes/{sandbox_id}", timeout=CLEANUP_TIMEOUT
-        )
+        resp = await client.delete(f"/v1/sandboxes/{sandbox_id}", timeout=CLEANUP_TIMEOUT)
         assert resp.status_code == 204
 
         # Trigger GC - should complete without error
@@ -113,12 +107,10 @@ async def test_gc_orphan_cargo_cleanup():
 
 async def test_gc_external_cargo_protected():
     """External cargo referenced by active sandbox is protected during GC.
-    
+
     Test case C from phase-1.5 implementation doc section 7.2.
     """
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create external cargo
         async with create_cargo(client) as ext_cargo:
             ext_cargo_id = ext_cargo["id"]
@@ -138,32 +130,24 @@ async def test_gc_external_cargo_protected():
                 assert gc_completed_without_error(gc_result)
 
                 # External cargo should still exist
-                resp = await client.get(
-                    f"/v1/cargos/{ext_cargo_id}", timeout=DEFAULT_TIMEOUT
-                )
+                resp = await client.get(f"/v1/cargos/{ext_cargo_id}", timeout=DEFAULT_TIMEOUT)
                 assert resp.status_code == 200
 
                 # Try to delete - should fail with 409
-                resp = await client.delete(
-                    f"/v1/cargos/{ext_cargo_id}", timeout=DEFAULT_TIMEOUT
-                )
+                resp = await client.delete(f"/v1/cargos/{ext_cargo_id}", timeout=DEFAULT_TIMEOUT)
                 assert resp.status_code == 409
 
             finally:
-                await client.delete(
-                    f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT
-                )
+                await client.delete(f"/v1/sandboxes/{sandbox['id']}", timeout=CLEANUP_TIMEOUT)
 
 
 async def test_gc_concurrent_sandbox_delete_idempotent():
     """Sandbox delete cascade and GC can run concurrently without error.
-    
+
     Test case B from phase-1.5 implementation doc section 7.2:
     Both paths should be idempotent.
     """
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         # Create sandbox
         resp = await client.post(
             "/v1/sandboxes",
@@ -175,13 +159,11 @@ async def test_gc_concurrent_sandbox_delete_idempotent():
         sandbox_id = sandbox["id"]
 
         # Delete sandbox (triggers cascade delete internally)
-        resp = await client.delete(
-            f"/v1/sandboxes/{sandbox_id}", timeout=CLEANUP_TIMEOUT
-        )
+        resp = await client.delete(f"/v1/sandboxes/{sandbox_id}", timeout=CLEANUP_TIMEOUT)
         assert resp.status_code == 204
 
         # Immediately trigger GC (may try to clean same cargo)
         gc_result = await trigger_gc(client, tasks=["orphan_cargo"])
-        
+
         # Should complete without error (idempotent)
         assert gc_completed_without_error(gc_result), f"GC failed: {gc_result}"

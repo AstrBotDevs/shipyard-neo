@@ -178,9 +178,7 @@ class Sandbox:
 
     async def get_execution(self, execution_id: str) -> ExecutionHistoryEntry:
         """Get one execution history record by ID."""
-        response = await self._http.get(
-            f"/v1/sandboxes/{self.id}/history/{execution_id}"
-        )
+        response = await self._http.get(f"/v1/sandboxes/{self.id}/history/{execution_id}")
         return ExecutionHistoryEntry.model_validate(response)
 
     async def get_last_execution(self, *, exec_type: str | None = None) -> ExecutionHistoryEntry:

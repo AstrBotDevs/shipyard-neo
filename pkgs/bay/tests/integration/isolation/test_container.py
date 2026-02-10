@@ -156,13 +156,15 @@ async def test_process_isolation():
         async with create_sandbox(client) as sandbox:
             r = await client.post(
                 f"/v1/sandboxes/{sandbox['id']}/python/exec",
-                json={"code": """
+                json={
+                    "code": """
 import subprocess
 result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
 lines = result.stdout.strip().split('\\n')
 print(f'process_count={len(lines)}')
 print(f'isolated={len(lines) < 20}')
-"""},
+"""
+                },
                 timeout=120.0,
             )
             assert r.status_code == 200

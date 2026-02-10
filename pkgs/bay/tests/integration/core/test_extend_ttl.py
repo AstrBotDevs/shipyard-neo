@@ -134,8 +134,9 @@ async def test_extend_ttl_rejects_expired():
                 f"/v1/sandboxes/{sandbox_id}/extend_ttl",
                 json={"extend_by": 10},
             )
-            assert extend_resp.status_code in (404, 409), \
+            assert extend_resp.status_code in (404, 409), (
                 f"Expected 404/409, got {extend_resp.status_code}: {extend_resp.text}"
+            )
 
             if extend_resp.status_code == 409:
                 assert extend_resp.json()["error"]["code"] == "sandbox_expired"

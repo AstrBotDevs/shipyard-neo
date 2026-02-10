@@ -26,7 +26,7 @@ logger = structlog.get_logger()
 
 class HTTPClientManager:
     """Manages a shared httpx.AsyncClient with connection pooling.
-    
+
     Usage:
         # In FastAPI lifespan
         @asynccontextmanager
@@ -34,7 +34,7 @@ class HTTPClientManager:
             await http_client_manager.startup()
             yield
             await http_client_manager.shutdown()
-        
+
         # In code
         client = http_client_manager.client
         response = await client.get("http://...")
@@ -52,7 +52,7 @@ class HTTPClientManager:
         pool_timeout: float = 10.0,
     ) -> None:
         """Initialize HTTP client manager.
-        
+
         Args:
             max_connections: Maximum number of concurrent connections.
                              Default 200 to handle high concurrency stress tests.
@@ -72,21 +72,19 @@ class HTTPClientManager:
         self._read_timeout = read_timeout
         self._write_timeout = write_timeout
         self._pool_timeout = pool_timeout
-        
+
         self._client: httpx.AsyncClient | None = None
         self._log = logger.bind(component="http_client")
 
     @property
     def client(self) -> httpx.AsyncClient:
         """Get the shared HTTP client.
-        
+
         Raises:
             RuntimeError: If client is not initialized (call startup first)
         """
         if self._client is None:
-            raise RuntimeError(
-                "HTTP client not initialized. Call startup() first."
-            )
+            raise RuntimeError("HTTP client not initialized. Call startup() first.")
         return self._client
 
     @property
@@ -149,10 +147,10 @@ http_client_manager = HTTPClientManager()
 @asynccontextmanager
 async def lifespan_http_client(app: "FastAPI") -> AsyncGenerator[None, None]:
     """FastAPI lifespan context manager for HTTP client.
-    
+
     Usage in main.py:
         from app.services.http import lifespan_http_client
-        
+
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             async with lifespan_http_client(app):
@@ -167,12 +165,12 @@ async def lifespan_http_client(app: "FastAPI") -> AsyncGenerator[None, None]:
 
 def get_http_client() -> httpx.AsyncClient:
     """Get the shared HTTP client (dependency injection helper).
-    
+
     Use this in FastAPI dependencies or anywhere you need the client.
-    
+
     Returns:
         Shared httpx.AsyncClient
-        
+
     Raises:
         RuntimeError: If client not initialized
     """

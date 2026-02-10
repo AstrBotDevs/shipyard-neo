@@ -226,9 +226,7 @@ class Driver(ABC):
     # Runtime instance discovery (for GC)
 
     @abstractmethod
-    async def list_runtime_instances(
-        self, *, labels: dict[str, str]
-    ) -> list[RuntimeInstance]:
+    async def list_runtime_instances(self, *, labels: dict[str, str]) -> list[RuntimeInstance]:
         """List runtime instances matching labels.
 
         Used by OrphanContainerGC to discover containers that may be orphaned.

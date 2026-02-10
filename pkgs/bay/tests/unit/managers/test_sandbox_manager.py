@@ -113,9 +113,7 @@ class TestSandboxManagerCreate:
         assert sandbox.deleted_at is None
 
         # Assert cargo was created and is managed
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == sandbox.cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == sandbox.cargo_id))
         cargo = result.scalars().first()
 
         assert cargo is not None
@@ -326,9 +324,7 @@ class TestSandboxManagerList:
         await sandbox_manager.stop(sandbox)
 
         # Assert cargo still exists
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo_id))
         cargo = result.scalars().first()
         assert cargo is not None
 
@@ -394,9 +390,7 @@ class TestSandboxManagerDelete:
         await sandbox_manager.delete(sandbox)
 
         # Assert - sandbox has deleted_at set
-        result = await db_session.execute(
-            select(Sandbox).where(Sandbox.id == sandbox_id)
-        )
+        result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox_id))
         deleted_sandbox = result.scalars().first()
         assert deleted_sandbox is not None
         assert deleted_sandbox.deleted_at is not None
@@ -413,9 +407,7 @@ class TestSandboxManagerDelete:
         cargo_id = sandbox.cargo_id
 
         # Get cargo driver_ref for assertion
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo_id))
         cargo = result.scalars().first()
         volume_name = cargo.driver_ref
 
@@ -423,9 +415,7 @@ class TestSandboxManagerDelete:
         await sandbox_manager.delete(sandbox)
 
         # Assert - cargo record deleted
-        result = await db_session.execute(
-            select(Cargo).where(Cargo.id == cargo_id)
-        )
+        result = await db_session.execute(select(Cargo).where(Cargo.id == cargo_id))
         cargo = result.scalars().first()
         assert cargo is None
 
@@ -480,9 +470,7 @@ class TestSandboxManagerDelete:
         await sandbox_manager.delete(sandbox)
 
         # Assert
-        result = await db_session.execute(
-            select(Sandbox).where(Sandbox.id == sandbox_id)
-        )
+        result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox_id))
         deleted_sandbox = result.scalars().first()
         assert deleted_sandbox.current_session_id is None
 
@@ -581,6 +569,7 @@ class TestRuntimeTypeFromProfile:
         primary = profile.get_primary_container()
         assert primary is not None
         assert primary.runtime_type == "browser"
+
 
 # Note: ensure_running tests require real runtime health checks,
 # so they are in integration tests instead of unit tests.

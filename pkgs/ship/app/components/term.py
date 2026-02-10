@@ -145,7 +145,9 @@ async def websocket_terminal(
                         try:
                             data = json.loads(text)
                             if data.get("type") == "resize":
-                                terminal.resize(data.get("cols", 80), data.get("rows", 24))
+                                terminal.resize(
+                                    data.get("cols", 80), data.get("rows", 24)
+                                )
                                 continue
                         except json.JSONDecodeError:
                             pass
@@ -154,7 +156,9 @@ async def websocket_terminal(
 
                 elif "bytes" in message:
                     # Binary data (also valid input)
-                    await terminal.write(message["bytes"].decode("utf-8", errors="replace"))
+                    await terminal.write(
+                        message["bytes"].decode("utf-8", errors="replace")
+                    )
 
             except WebSocketDisconnect:
                 break

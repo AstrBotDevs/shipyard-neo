@@ -31,6 +31,7 @@ async def test_concurrent_exec_creates_single_session():
         sandbox_id = create_resp.json()["id"]
 
         try:
+
             async def exec_python(idx: int) -> dict[str, Any]:
                 resp = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
@@ -50,12 +51,10 @@ async def test_concurrent_exec_creates_single_session():
 
             # Count results
             successes = sum(
-                1 for r in results
-                if not isinstance(r, Exception) and r["status"] == 200
+                1 for r in results if not isinstance(r, Exception) and r["status"] == 200
             )
             retryable = sum(
-                1 for r in results
-                if not isinstance(r, Exception) and r["status"] == 503
+                1 for r in results if not isinstance(r, Exception) and r["status"] == 503
             )
 
             # At least some should succeed or be retryable (503 during startup is expected)

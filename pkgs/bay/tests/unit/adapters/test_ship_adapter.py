@@ -44,11 +44,13 @@ class TestShipAdapterExecPython:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "success": True,
-                "output": {"text": "3"},
-                "execution_count": 1,
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "output": {"text": "3"},
+                    "execution_count": 1,
+                }
+            )
 
         # Create adapter with mock transport
         transport = httpx.MockTransport(handler)
@@ -74,12 +76,14 @@ class TestShipAdapterExecPython:
         """exec_python should correctly parse Ship response."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "success": True,
-                "output": {"text": "Hello, World!\n", "data": {}},
-                "execution_count": 5,
-                "error": None,
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "output": {"text": "Hello, World!\n", "data": {}},
+                    "execution_count": 5,
+                    "error": None,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -105,12 +109,14 @@ class TestShipAdapterExecPython:
         """exec_python should handle error responses correctly."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "success": False,
-                "output": {"text": ""},
-                "error": "NameError: name 'undefined_var' is not defined",
-                "execution_count": 2,
-            })
+            return mock_response(
+                {
+                    "success": False,
+                    "output": {"text": ""},
+                    "error": "NameError: name 'undefined_var' is not defined",
+                    "execution_count": 2,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -157,13 +163,15 @@ class TestShipAdapterListFiles:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "files": [
-                    {"name": "test.py", "type": "file", "size": 100},
-                    {"name": "src", "type": "directory", "size": 0},
-                ],
-                "current_path": "/workspace",
-            })
+            return mock_response(
+                {
+                    "files": [
+                        {"name": "test.py", "type": "file", "size": 100},
+                        {"name": "src", "type": "directory", "size": 0},
+                    ],
+                    "current_path": "/workspace",
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -183,14 +191,16 @@ class TestShipAdapterListFiles:
         """list_files should correctly parse Ship files response."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "files": [
-                    {"name": "main.py", "type": "file", "size": 500},
-                    {"name": "utils", "type": "directory", "size": 0},
-                    {"name": "data.json", "type": "file", "size": 1024},
-                ],
-                "current_path": "/workspace/project",
-            })
+            return mock_response(
+                {
+                    "files": [
+                        {"name": "main.py", "type": "file", "size": 500},
+                        {"name": "utils", "type": "directory", "size": 0},
+                        {"name": "data.json", "type": "file", "size": 1024},
+                    ],
+                    "current_path": "/workspace/project",
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -220,11 +230,13 @@ class TestShipAdapterReadFile:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "content": "file content here",
-                "path": "test.txt",
-                "size": 17,
-            })
+            return mock_response(
+                {
+                    "content": "file content here",
+                    "path": "test.txt",
+                    "size": 17,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -243,11 +255,13 @@ class TestShipAdapterReadFile:
         """read_file should return content from Ship response."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "content": "print('Hello World')\n",
-                "path": "main.py",
-                "size": 21,
-            })
+            return mock_response(
+                {
+                    "content": "print('Hello World')\n",
+                    "path": "main.py",
+                    "size": 21,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -273,11 +287,13 @@ class TestShipAdapterWriteFile:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "success": True,
-                "path": "test.txt",
-                "size": 13,
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "path": "test.txt",
+                    "size": 13,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -301,10 +317,12 @@ class TestShipAdapterWriteFile:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "success": True,
-                "path": "subdir/nested/file.py",
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "path": "subdir/nested/file.py",
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -405,15 +423,17 @@ class TestShipAdapterExecShell:
             nonlocal captured_request
             captured_request = request
             # Use Ship's actual response format
-            return mock_response({
-                "success": True,
-                "return_code": 0,
-                "stdout": "total 4\ndrwxr-xr-x 2 user user 4096 Jan 1 00:00 .\n",
-                "stderr": "",
-                "pid": 1234,
-                "process_id": None,
-                "error": None,
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "return_code": 0,
+                    "stdout": "total 4\ndrwxr-xr-x 2 user user 4096 Jan 1 00:00 .\n",
+                    "stderr": "",
+                    "pid": 1234,
+                    "process_id": None,
+                    "error": None,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -436,12 +456,14 @@ class TestShipAdapterExecShell:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "success": True,
-                "return_code": 0,
-                "stdout": "hello.txt\n",
-                "stderr": "",
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "return_code": 0,
+                    "stdout": "hello.txt\n",
+                    "stderr": "",
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -459,15 +481,17 @@ class TestShipAdapterExecShell:
 
         def handler(request: httpx.Request) -> httpx.Response:
             # Ship's actual response format
-            return mock_response({
-                "success": True,
-                "return_code": 0,
-                "stdout": "hello\n",
-                "stderr": "",
-                "pid": 1234,
-                "process_id": None,
-                "error": None,
-            })
+            return mock_response(
+                {
+                    "success": True,
+                    "return_code": 0,
+                    "stdout": "hello\n",
+                    "stderr": "",
+                    "pid": 1234,
+                    "process_id": None,
+                    "error": None,
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -489,13 +513,15 @@ class TestShipAdapterExecShell:
         """exec_shell should handle non-zero exit codes."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "success": False,
-                "return_code": 1,
-                "stdout": "",
-                "stderr": "command not found: nonexistent",
-                "error": "command not found: nonexistent",
-            })
+            return mock_response(
+                {
+                    "success": False,
+                    "return_code": 1,
+                    "stdout": "",
+                    "stderr": "command not found: nonexistent",
+                    "error": "command not found: nonexistent",
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -597,17 +623,19 @@ class TestShipAdapterMeta:
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal captured_request
             captured_request = request
-            return mock_response({
-                "name": "ship",
-                "version": "1.0.0",
-                "api_version": "v1",
-                "mount_path": "/workspace",
-                "capabilities": {
-                    "python": {"operations": ["exec"]},
-                    "shell": {"operations": ["exec"]},
-                    "filesystem": {"operations": ["read", "write", "delete", "list"]},
-                },
-            })
+            return mock_response(
+                {
+                    "name": "ship",
+                    "version": "1.0.0",
+                    "api_version": "v1",
+                    "mount_path": "/workspace",
+                    "capabilities": {
+                        "python": {"operations": ["exec"]},
+                        "shell": {"operations": ["exec"]},
+                        "filesystem": {"operations": ["read", "write", "delete", "list"]},
+                    },
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
@@ -624,16 +652,18 @@ class TestShipAdapterMeta:
         """get_meta should parse RuntimeMeta correctly."""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return mock_response({
-                "name": "ship",
-                "version": "1.0.0",
-                "api_version": "v1",
-                "mount_path": "/workspace",
-                "capabilities": {
-                    "python": {"operations": ["exec"]},
-                    "shell": {"operations": ["exec"]},
-                },
-            })
+            return mock_response(
+                {
+                    "name": "ship",
+                    "version": "1.0.0",
+                    "api_version": "v1",
+                    "mount_path": "/workspace",
+                    "capabilities": {
+                        "python": {"operations": ["exec"]},
+                        "shell": {"operations": ["exec"]},
+                    },
+                }
+            )
 
         transport = httpx.MockTransport(handler)
 
