@@ -113,7 +113,7 @@ pip install -e .
 
 - 缺少必填字段或类型不合法时，返回 `**Validation Error:** ...`，不会暴露底层 `KeyError`。
 - 所有 `sandbox_id` 经过正则格式校验（`^[a-zA-Z0-9_-]{1,128}$`），拒绝路径穿越等注入攻击。
-- 枚举值（`exec_type`、`stage`）和数值范围（`limit`、`timeout`）有白名单/边界检查。
+- 枚举值（`exec_type`、`stage`）和数值范围（`limit`、`timeout`）有白名单/边界检查（`exec_type` 支持 `python/shell/browser/browser_batch`）。
 
 ### 输出截断
 
@@ -174,7 +174,7 @@ pip install -e .
 ### `get_execution_history`
 
 - `sandbox_id` (必填)
-- `exec_type` (可选：`python` / `shell`)
+- `exec_type` (可选：`python` / `shell` / `browser` / `browser_batch`)
 - `success_only` (可选)
 - `limit` (可选)
 - `tags` (可选)

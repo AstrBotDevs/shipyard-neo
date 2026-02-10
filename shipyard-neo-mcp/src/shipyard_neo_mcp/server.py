@@ -67,6 +67,24 @@ _SDK_CALL_TIMEOUT = _read_positive_int_env("SHIPYARD_SDK_CALL_TIMEOUT", 600)
 _SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 
+def _validate_relative_path(path: str) -> str:
+    """Basic local validation for workspace-relative paths.
+
+    Bay will perform authoritative validation, but doing a lightweight check here:
+    - improves error messages
+    - avoids sending obviously invalid requests
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("field 'path' must be a non-empty string")
+    if path.startswith("/"):
+        raise ValueError("invalid path: absolute paths are not allowed")
+    # Normalize separators a bit (still let Bay do strict validation)
+    parts = [p for p in path.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise ValueError("invalid path: path traversal ('..') is not allowed")
+    return path
+
+
 def _truncate_text(text: str | None, *, limit: int = _MAX_TOOL_TEXT_CHARS) -> str:
     if text is None:
         return ""
@@ -220,11 +238,22 @@ def get_config() -> dict[str, Any]:
             "Set it in your MCP configuration."
         )
 
+    default_profile = os.environ.get("SHIPYARD_DEFAULT_PROFILE", "python-default")
+
+    # Allow ttl=0 for infinite TTL.
+    default_ttl_raw = os.environ.get("SHIPYARD_DEFAULT_TTL", "3600")
+    try:
+        default_ttl = int(default_ttl_raw)
+    except ValueError:
+        default_ttl = 3600
+    if default_ttl < 0:
+        default_ttl = 3600
+
     return {
         "endpoint_url": endpoint,
         "access_token": token,
-        "default_profile": os.environ.get("SHIPYARD_DEFAULT_PROFILE", "python-default"),
-        "default_ttl": int(os.environ.get("SHIPYARD_DEFAULT_TTL", "3600")),
+        "default_profile": default_profile,
+        "default_ttl": default_ttl,
     }
 
 
@@ -445,7 +474,7 @@ async def list_tools() -> list[Tool]:
                     "sandbox_id": {"type": "string", "description": "The sandbox ID."},
                     "exec_type": {
                         "type": "string",
-                        "description": "Optional execution type filter: python or shell.",
+                        "description": "Optional execution type filter: python / shell / browser / browser_batch.",
                     },
                     "success_only": {
                         "type": "boolean",
@@ -495,7 +524,7 @@ async def list_tools() -> list[Tool]:
                     "sandbox_id": {"type": "string", "description": "The sandbox ID."},
                     "exec_type": {
                         "type": "string",
-                        "description": "Optional execution type filter: python or shell.",
+                        "description": "Optional execution type filter: python / shell / browser / browser_batch.",
                     },
                 },
                 "required": ["sandbox_id"],
@@ -836,13 +865,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             tags = _optional_str(arguments, "tags")
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.python.exec(
-                code,
-                timeout=timeout,
-                include_code=include_code,
-                description=description,
-                tags=tags,
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                result = await sandbox.python.exec(
+                    code,
+                    timeout=timeout,
+                    include_code=include_code,
+                    description=description,
+                    tags=tags,
+                )
 
             if result.success:
                 output = _truncate_text(result.output or "(no output)")
@@ -881,14 +911,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             tags = _optional_str(arguments, "tags")
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.shell.exec(
-                command,
-                cwd=cwd,
-                timeout=timeout,
-                include_code=include_code,
-                description=description,
-                tags=tags,
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                result = await sandbox.shell.exec(
+                    command,
+                    cwd=cwd,
+                    timeout=timeout,
+                    include_code=include_code,
+                    description=description,
+                    tags=tags,
+                )
 
             output = _truncate_text(result.output or "(no output)")
             status = "successful" if result.success else "failed"
@@ -910,10 +941,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         elif name == "read_file":
             sandbox_id = _validate_sandbox_id(arguments)
-            path = _require_str(arguments, "path")
+            path = _validate_relative_path(_require_str(arguments, "path"))
 
             sandbox = await get_sandbox(sandbox_id)
-            content = _truncate_text(await sandbox.filesystem.read_file(path))
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                raw = await sandbox.filesystem.read_file(path)
+            content = _truncate_text(raw)
 
             return [
                 TextContent(
@@ -924,7 +957,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         elif name == "write_file":
             sandbox_id = _validate_sandbox_id(arguments)
-            path = _require_str(arguments, "path")
+            path = _validate_relative_path(_require_str(arguments, "path"))
             content = _require_str(arguments, "content")
 
             content_bytes = len(content.encode("utf-8"))
@@ -935,7 +968,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 )
 
             sandbox = await get_sandbox(sandbox_id)
-            await sandbox.filesystem.write_file(path, content)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                await sandbox.filesystem.write_file(path, content)
 
             return [
                 TextContent(
@@ -949,9 +983,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             path = arguments.get("path", ".")
             if not isinstance(path, str):
                 raise ValueError("field 'path' must be a string")
+            path = _validate_relative_path(path)
 
             sandbox = await get_sandbox(sandbox_id)
-            entries = await sandbox.filesystem.list_dir(path)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                entries = await sandbox.filesystem.list_dir(path)
 
             if not entries:
                 return [
@@ -973,10 +1009,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         elif name == "delete_file":
             sandbox_id = _validate_sandbox_id(arguments)
-            path = _require_str(arguments, "path")
+            path = _validate_relative_path(_require_str(arguments, "path"))
 
             sandbox = await get_sandbox(sandbox_id)
-            await sandbox.filesystem.delete(path)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                await sandbox.filesystem.delete(path)
 
             return [
                 TextContent(
@@ -989,14 +1026,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             sandbox_id = _validate_sandbox_id(arguments)
             sandbox = await get_sandbox(sandbox_id)
 
-            history = await sandbox.get_execution_history(
-                exec_type=_read_exec_type(arguments, "exec_type"),
-                success_only=_read_bool(arguments, "success_only", False),
-                limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
-                tags=_optional_str(arguments, "tags"),
-                has_notes=_read_bool(arguments, "has_notes", False),
-                has_description=_read_bool(arguments, "has_description", False),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                history = await sandbox.get_execution_history(
+                    exec_type=_read_exec_type(arguments, "exec_type"),
+                    success_only=_read_bool(arguments, "success_only", False),
+                    limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
+                    tags=_optional_str(arguments, "tags"),
+                    has_notes=_read_bool(arguments, "has_notes", False),
+                    has_description=_read_bool(arguments, "has_description", False),
+                )
 
             if not history.entries:
                 return [TextContent(type="text", text="No execution history found.")]
@@ -1016,7 +1054,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             sandbox_id = _validate_sandbox_id(arguments)
             execution_id = _require_str(arguments, "execution_id")
             sandbox = await get_sandbox(sandbox_id)
-            entry = await sandbox.get_execution(execution_id)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                entry = await sandbox.get_execution(execution_id)
             return [
                 TextContent(
                     type="text",
@@ -1038,9 +1077,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         elif name == "get_last_execution":
             sandbox_id = _validate_sandbox_id(arguments)
             sandbox = await get_sandbox(sandbox_id)
-            entry = await sandbox.get_last_execution(
-                exec_type=_read_exec_type(arguments, "exec_type")
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                entry = await sandbox.get_last_execution(
+                    exec_type=_read_exec_type(arguments, "exec_type")
+                )
             return [
                 TextContent(
                     type="text",
@@ -1058,12 +1098,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             sandbox_id = _validate_sandbox_id(arguments)
             execution_id = _require_str(arguments, "execution_id")
             sandbox = await get_sandbox(sandbox_id)
-            entry = await sandbox.annotate_execution(
-                execution_id,
-                description=_optional_str(arguments, "description"),
-                tags=_optional_str(arguments, "tags"),
-                notes=_optional_str(arguments, "notes"),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                entry = await sandbox.annotate_execution(
+                    execution_id,
+                    description=_optional_str(arguments, "description"),
+                    tags=_optional_str(arguments, "tags"),
+                    notes=_optional_str(arguments, "notes"),
+                )
             return [
                 TextContent(
                     type="text",
@@ -1079,12 +1120,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         elif name == "create_skill_candidate":
             skill_key = _require_str(arguments, "skill_key")
             source_execution_ids = _require_str_list(arguments, "source_execution_ids")
-            candidate = await _client.skills.create_candidate(
-                skill_key=skill_key,
-                source_execution_ids=source_execution_ids,
-                scenario_key=_optional_str(arguments, "scenario_key"),
-                payload_ref=_optional_str(arguments, "payload_ref"),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                candidate = await _client.skills.create_candidate(
+                    skill_key=skill_key,
+                    source_execution_ids=source_execution_ids,
+                    scenario_key=_optional_str(arguments, "scenario_key"),
+                    payload_ref=_optional_str(arguments, "payload_ref"),
+                )
             return [
                 TextContent(
                     type="text",
@@ -1102,13 +1144,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             passed = arguments.get("passed")
             if not isinstance(passed, bool):
                 raise ValueError("field 'passed' must be a boolean")
-            evaluation = await _client.skills.evaluate_candidate(
-                candidate_id,
-                passed=passed,
-                score=_read_optional_number(arguments, "score"),
-                benchmark_id=_optional_str(arguments, "benchmark_id"),
-                report=_optional_str(arguments, "report"),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                evaluation = await _client.skills.evaluate_candidate(
+                    candidate_id,
+                    passed=passed,
+                    score=_read_optional_number(arguments, "score"),
+                    benchmark_id=_optional_str(arguments, "benchmark_id"),
+                    report=_optional_str(arguments, "report"),
+                )
             return [
                 TextContent(
                     type="text",
@@ -1123,10 +1166,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         elif name == "promote_skill_candidate":
             candidate_id = _require_str(arguments, "candidate_id")
-            release = await _client.skills.promote_candidate(
-                candidate_id,
-                stage=_read_release_stage(arguments, key="stage", default="canary"),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                release = await _client.skills.promote_candidate(
+                    candidate_id,
+                    stage=_read_release_stage(arguments, key="stage", default="canary"),
+                )
             return [
                 TextContent(
                     type="text",
@@ -1142,12 +1186,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "list_skill_candidates":
-            candidates = await _client.skills.list_candidates(
-                status=_optional_str(arguments, "status"),
-                skill_key=_optional_str(arguments, "skill_key"),
-                limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
-                offset=_read_int(arguments, "offset", 0, min_value=0),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                candidates = await _client.skills.list_candidates(
+                    status=_optional_str(arguments, "status"),
+                    skill_key=_optional_str(arguments, "skill_key"),
+                    limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
+                    offset=_read_int(arguments, "offset", 0, min_value=0),
+                )
             if not candidates.items:
                 return [TextContent(type="text", text="No skill candidates found.")]
             lines = [f"Total: {candidates.total}"]
@@ -1158,15 +1203,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "list_skill_releases":
-            releases = await _client.skills.list_releases(
-                skill_key=_optional_str(arguments, "skill_key"),
-                active_only=_read_bool(arguments, "active_only", False),
-                stage=_read_release_stage(
-                    arguments, key="stage", required=False, default=None
-                ),
-                limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
-                offset=_read_int(arguments, "offset", 0, min_value=0),
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                releases = await _client.skills.list_releases(
+                    skill_key=_optional_str(arguments, "skill_key"),
+                    active_only=_read_bool(arguments, "active_only", False),
+                    stage=_read_release_stage(
+                        arguments, key="stage", required=False, default=None
+                    ),
+                    limit=_read_int(arguments, "limit", 50, min_value=1, max_value=500),
+                    offset=_read_int(arguments, "offset", 0, min_value=0),
+                )
             if not releases.items:
                 return [TextContent(type="text", text="No skill releases found.")]
             lines = [f"Total: {releases.total}"]
@@ -1178,7 +1224,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         elif name == "rollback_skill_release":
             release_id = _require_str(arguments, "release_id")
-            rollback_release = await _client.skills.rollback_release(release_id)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                rollback_release = await _client.skills.rollback_release(release_id)
             return [
                 TextContent(
                     type="text",
@@ -1198,7 +1245,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.browser.exec(cmd, timeout=timeout)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                result = await sandbox.browser.exec(cmd, timeout=timeout)
 
             output = _truncate_text(result.output or "(no output)")
             status = "successful" if result.success else "failed"
@@ -1224,11 +1272,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             stop_on_error = _read_bool(arguments, "stop_on_error", True)
 
             sandbox = await get_sandbox(sandbox_id)
-            result = await sandbox.browser.exec_batch(
-                commands,
-                timeout=timeout,
-                stop_on_error=stop_on_error,
-            )
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                result = await sandbox.browser.exec_batch(
+                    commands,
+                    timeout=timeout,
+                    stop_on_error=stop_on_error,
+                )
 
             lines = [
                 f"**Batch execution {'completed' if result.success else 'failed'}** "
@@ -1252,7 +1301,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "list_profiles":
-            profiles = await _client.list_profiles(detail=True)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                profiles = await _client.list_profiles(detail=True)
 
             if not profiles.items:
                 return [TextContent(type="text", text="No profiles available.")]

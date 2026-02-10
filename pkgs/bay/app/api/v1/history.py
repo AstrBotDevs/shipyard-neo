@@ -71,7 +71,7 @@ async def get_execution_history(
     sandbox_mgr: SandboxManagerDep,
     skill_svc: SkillLifecycleServiceDep,
     owner: AuthDep,
-    exec_type: str | None = Query(None, pattern="^(python|shell)$"),
+    exec_type: str | None = Query(None, pattern="^(python|shell|browser|browser_batch)$"),
     success_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -107,7 +107,7 @@ async def get_last_execution(
     sandbox_mgr: SandboxManagerDep,
     skill_svc: SkillLifecycleServiceDep,
     owner: AuthDep,
-    exec_type: str | None = Query(None, pattern="^(python|shell)$"),
+    exec_type: str | None = Query(None, pattern="^(python|shell|browser|browser_batch)$"),
 ) -> ExecutionHistoryEntryResponse:
     """Get latest execution record for a sandbox."""
     await sandbox_mgr.get(sandbox_id, owner)
