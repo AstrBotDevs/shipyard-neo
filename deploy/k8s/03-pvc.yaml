@@ -1,0 +1,23 @@
+# Bay 持久化存储 (PVC)
+#
+# - bay-data: SQLite 数据库持久化
+# - bay-cargos: Cargo 存储持久化（仅 Docker 驱动需要，K8s 驱动使用动态 PVC）
+#
+# 默认使用集群默认 StorageClass。如需指定，取消 storageClassName 注释。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bay-data
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: shipyard-neo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: "local-path"  # 取消注释以指定 StorageClass

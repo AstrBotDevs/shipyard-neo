@@ -1,0 +1,70 @@
+# Bay Deployment
+#
+# Bay API 网关，通过 K8s API 动态创建 Ship/Gull sandbox Pod。
+# 使用 in-cluster config 自动获取 K8s 凭据。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bay
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bay
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bay
+        app.kubernetes.io/part-of: shipyard-neo
+    spec:
+      serviceAccountName: bay
+      containers:
+        - name: bay
+          image: ghcr.io/astrbotdevs/shipyard-neo-bay:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: BAY_CONFIG_FILE
+              value: "/etc/bay/config.yaml"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/bay
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+      volumes:
+        - name: config
+          configMap:
+            name: bay-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: bay-data
+      restartPolicy: Always

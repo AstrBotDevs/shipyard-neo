@@ -1,0 +1,28 @@
+# Bay Service - LoadBalancer 暴露
+#
+# 将 Bay API 通过 LoadBalancer 暴露到集群外部。
+# 云环境（AWS/GCP/Azure）会自动分配外部 IP。
+# 裸金属环境可使用 MetalLB 或改为 NodePort。
+apiVersion: v1
+kind: Service
+metadata:
+  name: bay
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: bay
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  # 如需固定 NodePort（改为 type: NodePort 后取消注释）：
+  # - name: http
+  #   port: 8000
+  #   targetPort: 8000
+  #   nodePort: 30800
+  #   protocol: TCP

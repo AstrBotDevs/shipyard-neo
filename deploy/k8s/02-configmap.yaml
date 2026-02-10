@@ -1,0 +1,121 @@
+# Bay 配置文件 (ConfigMap)
+#
+# 部署前必须修改 CHANGE-ME 标注的项。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bay-config
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 8000
+
+    database:
+      url: "sqlite+aiosqlite:///./data/bay.db"
+      echo: false
+
+    driver:
+      type: k8s
+      k8s:
+        namespace: "bay"
+        kubeconfig: null  # in-cluster config（Pod 内自动获取）
+        storage_class: null  # 使用集群默认 StorageClass（如需指定取消注释下行）
+        # storage_class: "local-path"
+        default_storage_size: "1Gi"
+        image_pull_secrets: []  # 如使用私有 registry 添加 secret 名称
+        pod_startup_timeout: 120
+        label_prefix: "bay"
+
+    cargo:
+      root_path: "/var/lib/bay/cargos"
+      default_size_limit_mb: 1024
+      mount_path: "/workspace"
+
+    security:
+      # CHANGE-ME: 设置一个强随机密钥 (e.g. `openssl rand -hex 32`)
+      api_key: "CHANGE-ME"
+      allow_anonymous: false
+
+    profiles:
+      # ── Standard Python sandbox ────────────────────────
+      - id: python-default
+        description: "Standard Python sandbox with filesystem and shell access"
+        image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+        runtime_type: ship
+        runtime_port: 8123
+        resources:
+          cpus: 1.0
+          memory: "1g"
+        capabilities:
+          - filesystem
+          - shell
+          - python
+        idle_timeout: 1800
+        env: {}
+
+      # ── Data Science sandbox (more resources) ──────────
+      - id: python-data
+        description: "Data science sandbox with extra CPU and memory"
+        image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+        runtime_type: ship
+        runtime_port: 8123
+        resources:
+          cpus: 2.0
+          memory: "4g"
+        capabilities:
+          - filesystem
+          - shell
+          - python
+        idle_timeout: 1800
+        env: {}
+
+      # ── Browser + Python multi-container sandbox ───────
+      - id: browser-python
+        description: "Browser automation with Python backend"
+        containers:
+          - name: ship
+            image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+            runtime_type: ship
+            runtime_port: 8123
+            resources:
+              cpus: 1.0
+              memory: "1g"
+            capabilities:
+              - python
+              - shell
+              - filesystem
+            primary_for:
+              - filesystem
+              - python
+              - shell
+            env: {}
+          - name: browser
+            image: "ghcr.io/astrbotdevs/shipyard-neo-gull:latest"
+            runtime_type: gull
+            runtime_port: 8080
+            resources:
+              cpus: 1.0
+              memory: "2g"
+            capabilities:
+              - browser
+            env: {}
+        idle_timeout: 1800
+
+    gc:
+      enabled: true
+      run_on_startup: true
+      interval_seconds: 300
+      instance_id: "bay-prod"
+      idle_session:
+        enabled: true
+      expired_sandbox:
+        enabled: true
+      orphan_cargo:
+        enabled: true
+      orphan_container:
+        enabled: true

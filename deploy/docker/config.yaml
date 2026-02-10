@@ -1,0 +1,131 @@
+# Bay Production Config - Docker Compose (container_network mode)
+#
+# Bay runs in a Docker container and connects to Ship/Gull containers
+# via a shared Docker network using container IP (no host port mapping).
+#
+# ┌─────────────────────────────────────────────────────────┐
+# │  部署前必须修改的项 (搜索 CHANGE-ME)：                   │
+# │    1. security.api_key  — 设置强随机密钥                 │
+# └─────────────────────────────────────────────────────────┘
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+database:
+  # SQLite for single-instance deployment.
+  # For HA / multi-instance, switch to PostgreSQL:
+  #   url: "postgresql+asyncpg://user:pass@db-host:5432/bay"
+  url: "sqlite+aiosqlite:///./data/bay.db"
+  echo: false
+
+driver:
+  type: docker
+  docker:
+    socket: "unix:///var/run/docker.sock"
+
+    # Bay in container, Ship/Gull in container — use container network direct connect
+    connect_mode: container_network
+
+    # Shared network name (must match docker-compose.yaml network)
+    network: "bay-network"
+
+    # Disable host port mapping — sandbox containers don't need to be reachable
+    # from outside the Docker network, reducing attack surface.
+    publish_ports: false
+    host_port: null
+
+cargo:
+  root_path: "/var/lib/bay/cargos"
+  default_size_limit_mb: 1024
+  mount_path: "/workspace"
+
+security:
+  # CHANGE-ME: 设置一个强随机密钥 (e.g. `openssl rand -hex 32`)
+  api_key: "CHANGE-ME"
+  allow_anonymous: false
+
+profiles:
+  # ── Standard Python sandbox ────────────────────────
+  - id: python-default
+    description: "Standard Python sandbox with filesystem and shell access"
+    image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+    runtime_type: ship
+    runtime_port: 8123
+    resources:
+      cpus: 1.0
+      memory: "1g"
+    capabilities:
+      - filesystem  # includes upload/download
+      - shell
+      - python
+    idle_timeout: 1800  # 30 minutes
+    env: {}
+
+  # ── Data Science sandbox (more resources) ──────────
+  - id: python-data
+    description: "Data science sandbox with extra CPU and memory"
+    image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+    runtime_type: ship
+    runtime_port: 8123
+    resources:
+      cpus: 2.0
+      memory: "4g"
+    capabilities:
+      - filesystem  # includes upload/download
+      - shell
+      - python
+    idle_timeout: 1800
+    env: {}
+
+  # ── Browser + Python multi-container sandbox ───────
+  - id: browser-python
+    description: "Browser automation with Python backend"
+    containers:
+      - name: ship
+        image: "ghcr.io/astrbotdevs/shipyard-neo-ship:latest"
+        runtime_type: ship
+        runtime_port: 8123
+        resources:
+          cpus: 1.0
+          memory: "1g"
+        capabilities:
+          - python
+          - shell
+          - filesystem  # includes upload/download
+        primary_for:
+          - filesystem
+          - python
+          - shell
+        env: {}
+      - name: browser
+        image: "ghcr.io/astrbotdevs/shipyard-neo-gull:latest"
+        runtime_type: gull
+        runtime_port: 8080
+        resources:
+          cpus: 1.0
+          memory: "2g"
+        capabilities:
+          - browser
+        env: {}
+    idle_timeout: 1800
+
+gc:
+  # Enable automatic GC for production
+  enabled: true
+  run_on_startup: true
+  interval_seconds: 300  # 5 minutes
+
+  # Instance identifier — MUST be unique in multi-instance deployments
+  instance_id: "bay-prod"
+
+  idle_session:
+    enabled: true
+  expired_sandbox:
+    enabled: true
+  orphan_cargo:
+    enabled: true
+  orphan_container:
+    # Enable in production to clean up leaked containers.
+    # Safe as long as instance_id is unique per Bay instance.
+    enabled: true

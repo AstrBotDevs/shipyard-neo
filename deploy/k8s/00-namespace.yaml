@@ -1,0 +1,8 @@
+# Bay Kubernetes 部署
+# 创建独立 namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bay
+  labels:
+    app.kubernetes.io/part-of: shipyard-neo

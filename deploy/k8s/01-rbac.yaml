@@ -1,0 +1,52 @@
+# Bay ServiceAccount 和 RBAC
+#
+# Bay 需要在同 namespace 中动态创建/删除 sandbox Pod 和 PVC。
+# 此 Role 限制为最小权限集。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bay
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bay-role
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+rules:
+  # Bay 动态创建 Ship/Gull sandbox Pod
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  # Bay 读取 sandbox Pod 日志
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Bay 为 Cargo 创建 PVC
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bay-rolebinding
+  namespace: bay
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+subjects:
+  - kind: ServiceAccount
+    name: bay
+    namespace: bay
+roleRef:
+  kind: Role
+  name: bay-role
+  apiGroup: rbac.authorization.k8s.io
