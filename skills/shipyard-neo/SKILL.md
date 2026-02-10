@@ -135,13 +135,20 @@ delete_file(sandbox_id="xxx", path="src/temp.py")
 
 Browser commands execute in the Gull container. **Do NOT add the `agent-browser` prefix.**
 
+Operational model (do this to avoid flaky runs):
+
+- Treat `cmd` as a single command line split into args and executed directly (not a shell script).
+- Orchestrate branching/loops in the agent logic, not inside `cmd`.
+- Always follow the cadence: **Navigate → Snapshot → Interact → Wait → Re-snapshot**.
+
 **Standard workflow**:
 
 1. `execute_browser(cmd="open https://example.com")` — Navigate
-2. `execute_browser(cmd="snapshot -i")` — Get interactive element refs (`@e1`, `@e2`, ...)
-3. Analyze snapshot output to determine next action
-4. `execute_browser(cmd="fill @e1 \"text\"")` — Interact using refs
-5. `execute_browser(cmd="snapshot -i")` — Re-snapshot after DOM changes (refs are invalidated)
+2. `execute_browser(cmd="wait --load networkidle")` — Stabilize (optional but recommended)
+3. `execute_browser(cmd="snapshot -i")` — Get interactive element refs (`@e1`, `@e2`, ...)
+4. Analyze snapshot output to determine next action
+5. `execute_browser(cmd="click ..." | "fill ..." | "select ...")` — Interact using refs
+6. If the DOM may have changed, run `execute_browser(cmd="snapshot -i")` again before further interactions
 
 **When to use single vs batch**:
 
@@ -151,7 +158,7 @@ Browser commands execute in the Gull container. **Do NOT add the `agent-browser`
 | Deterministic sequence (open → fill → click → wait) | `execute_browser_batch` |
 | Complex conditional flows (login, error recovery) | Agent orchestrates multiple single calls |
 
-See [references/browser.md](references/browser.md) for detailed browser commands and patterns.
+Read [`skills/shipyard-neo/references/browser.md`](skills/shipyard-neo/references/browser.md:1) for the detailed command reference, patterns, and artifact handling.
 
 ### 5. Execution History
 
@@ -191,7 +198,7 @@ See [references/skills-lifecycle.md](references/skills-lifecycle.md) for the com
 
 | Reference | When to Use |
 |-----------|-------------|
-| [references/tools-reference.md](references/tools-reference.md) | Full parameter reference for all 21 MCP tools |
+| [references/tools-reference.md](references/tools-reference.md) | Full parameter reference for all 19 MCP tools |
 | [references/browser.md](references/browser.md) | Browser automation commands, patterns, and troubleshooting |
 | [references/skills-lifecycle.md](references/skills-lifecycle.md) | Skill candidate → evaluate → promote → rollback workflow |
 | [references/sandbox-environment.md](references/sandbox-environment.md) | Ship/Gull container pre-installed environment and capability details |

@@ -7,7 +7,7 @@ A sandbox's container topology depends on the **profile** used to create it. Som
 Call `list_profiles` to discover available profiles and their container topology:
 
 ```
-list_profiles(reason="Discover available profiles")
+list_profiles()
 ```
 
 **Example output** (with container detail):

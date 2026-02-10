@@ -2,6 +2,35 @@
 
 Browser automation in Shipyard Neo runs in the **Gull container**, separate from the Ship container (Python/Shell). All commands execute via the `execute_browser` and `execute_browser_batch` MCP tools.
 
+If a workflow is complex or repeatedly failing, load the deep dive: [`skills/shipyard-neo/references/browser-deep-dive.md`](skills/shipyard-neo/references/browser-deep-dive.md:1).
+
+## Execution Model (Important)
+
+Treat `cmd` as a **single command line** that is split into arguments and executed directly. It is **not** a Bash shell script.
+
+Implications:
+
+- Avoid shell syntax/operators inside `cmd`: `>`, `|`, `&&`, `;`, subshells, heredocs.
+- Do not expect environment expansion in `cmd`: `$VAR`, `~`, globbing like `*.png`.
+- When an argument contains spaces, wrap it in quotes so it stays a single argument:
+  - ✅ `fill @e1 "hello world"`
+  - ❌ `fill @e1 hello world`
+
+Workflow implication:
+
+- Orchestrate control flow in the agent loop, not inside `cmd`.
+- Prefer: `open → wait → snapshot → (analyze output) → click/fill → wait → snapshot`.
+- If a step may branch (already logged-in vs needs login; modal present vs not), do **single-step** calls with snapshots between them.
+
+## Persisting Text Output to Files
+
+Because `cmd` is not a shell, `get text body > page.txt` will not work.
+
+To save text:
+
+1. Run a `get ...` command (e.g., `get text body`) and capture the returned output.
+2. Write that captured text into a file via filesystem tools (e.g., `write_file(path="page.txt", content=...)`).
+
 ## Critical Rules
 
 1. **Never include `agent-browser` prefix** — Gull auto-injects it. Sending `agent-browser open ...` becomes `agent-browser agent-browser open ...` and fails.
@@ -73,14 +102,26 @@ wait --url "**/page"          Wait for URL pattern
 wait 2000                     Wait milliseconds
 ```
 
-### Capture
+### Capture (Artifacts)
+
+Write artifacts into the shared workspace so they are durable and accessible across containers.
 
 ```
-screenshot                    Screenshot to temp dir
-screenshot /workspace/pg.png  Screenshot to specific path
-screenshot --full             Full page screenshot
-pdf output.pdf                Save as PDF
+screenshot                           Screenshot to temp dir
+screenshot /workspace/pg.png         Screenshot to a specific path under /workspace
+screenshot --full /workspace/full.png
+pdf /workspace/page.pdf              Save as PDF under /workspace
 ```
+
+**Path rule**:
+
+- Use absolute paths under `/workspace/...` when you want to keep the output.
+- Later references typically use the **relative path under the workspace** (e.g., `screenshots/pg.png`).
+
+**How to retrieve artifacts**:
+
+- Text artifacts: `read_file(path="...")` works.
+- Binary artifacts (PNG/PDF): retrieve via the platform download mechanism using the relative path under the workspace.
 
 ### Semantic Locators (Alternative to Refs)
 

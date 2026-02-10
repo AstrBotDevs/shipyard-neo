@@ -29,9 +29,9 @@ List available sandbox profiles. Profiles define runtime capabilities, resource 
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `reason` | string | Yes | Brief explanation of why you need to list profiles |
+| *(none)* | — | — | This tool takes no parameters |
 
-**Returns**: Profile ID, capabilities (python, shell, filesystem, browser), idle_timeout.
+**Returns**: Profile ID, capabilities (python, shell, filesystem, browser), idle_timeout, and (when available) per-container topology.
 
 **Common profiles**:
 
