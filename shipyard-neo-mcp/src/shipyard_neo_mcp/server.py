@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import sys
 from collections import OrderedDict
@@ -61,6 +62,9 @@ _MAX_SANDBOX_CACHE_SIZE = _read_positive_int_env("SHIPYARD_SANDBOX_CACHE_SIZE", 
 _MAX_WRITE_FILE_BYTES = _read_positive_int_env(
     "SHIPYARD_MAX_WRITE_FILE_BYTES", 5 * 1024 * 1024
 )
+_MAX_TRANSFER_FILE_BYTES = _read_positive_int_env(
+    "SHIPYARD_MAX_TRANSFER_FILE_BYTES", 50 * 1024 * 1024
+)
 _SDK_CALL_TIMEOUT = _read_positive_int_env("SHIPYARD_SDK_CALL_TIMEOUT", 600)
 
 # Sandbox ID format: alphanumeric + hyphens + underscores, 1-128 chars
@@ -83,6 +87,20 @@ def _validate_relative_path(path: str) -> str:
     if any(p == ".." for p in parts):
         raise ValueError("invalid path: path traversal ('..') is not allowed")
     return path
+
+
+def _validate_local_path(local_path: str) -> Path:
+    """Validate and resolve a local filesystem path.
+
+    Ensures the path is absolute (or resolves relative to cwd),
+    and does not contain null bytes.
+    """
+    if not isinstance(local_path, str) or not local_path.strip():
+        raise ValueError("field 'local_path' must be a non-empty string")
+    if "\x00" in local_path:
+        raise ValueError("invalid local_path: null bytes not allowed")
+    resolved = Path(local_path).expanduser().resolve()
+    return resolved
 
 
 def _truncate_text(text: str | None, *, limit: int = _MAX_TOOL_TEXT_CHARS) -> str:
@@ -760,6 +778,72 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="upload_file",
+            description=(
+                "Upload a local file to a sandbox workspace. "
+                "Reads a file from the local filesystem (where the MCP server runs) "
+                "and uploads it to the sandbox. Supports binary files (images, PDFs, "
+                "archives, etc.). Use this instead of write_file when dealing with "
+                "binary content or existing local files."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {
+                        "type": "string",
+                        "description": "The sandbox ID.",
+                    },
+                    "local_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute or relative path to the local file to upload. "
+                            "Relative paths are resolved from the MCP server's working directory."
+                        ),
+                    },
+                    "sandbox_path": {
+                        "type": "string",
+                        "description": (
+                            "Target path in the sandbox workspace, relative to /workspace. "
+                            "If not provided, uses the local file's name."
+                        ),
+                    },
+                },
+                "required": ["sandbox_id", "local_path"],
+            },
+        ),
+        Tool(
+            name="download_file",
+            description=(
+                "Download a file from a sandbox workspace to the local filesystem. "
+                "Fetches a file from the sandbox and saves it locally (where the MCP "
+                "server runs). Supports binary files (images, PDFs, archives, etc.). "
+                "Use this instead of read_file when you need the actual file on disk "
+                "or when dealing with binary content."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sandbox_id": {
+                        "type": "string",
+                        "description": "The sandbox ID.",
+                    },
+                    "sandbox_path": {
+                        "type": "string",
+                        "description": "File path in the sandbox, relative to /workspace.",
+                    },
+                    "local_path": {
+                        "type": "string",
+                        "description": (
+                            "Local destination path. Absolute or relative to the MCP server's "
+                            "working directory. Parent directories will be created if needed. "
+                            "If not provided, saves to the current directory using the sandbox file's name."
+                        ),
+                    },
+                },
+                "required": ["sandbox_id", "sandbox_path"],
+            },
+        ),
+        Tool(
             name="list_profiles",
             description=(
                 "List available sandbox profiles. "
@@ -1299,6 +1383,108 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     )
 
             return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "upload_file":
+            sandbox_id = _validate_sandbox_id(arguments)
+            local_path_str = _require_str(arguments, "local_path")
+            local_path = _validate_local_path(local_path_str)
+
+            # Determine sandbox target path
+            sandbox_path_raw = _optional_str(arguments, "sandbox_path")
+            if sandbox_path_raw:
+                sandbox_path = _validate_relative_path(sandbox_path_raw)
+            else:
+                sandbox_path = local_path.name
+
+            # Validate local file exists and is readable
+            if not local_path.exists():
+                raise ValueError(f"local file not found: {local_path}")
+            if not local_path.is_file():
+                raise ValueError(f"local path is not a file: {local_path}")
+
+            # Check file size
+            file_size = local_path.stat().st_size
+            if file_size > _MAX_TRANSFER_FILE_BYTES:
+                raise ValueError(
+                    f"file too large: {file_size} bytes "
+                    f"exceeds limit of {_MAX_TRANSFER_FILE_BYTES} bytes"
+                )
+
+            # Read and upload
+            content = local_path.read_bytes()
+            sandbox = await get_sandbox(sandbox_id)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                await sandbox.filesystem.upload(sandbox_path, content)
+
+            logger.info(
+                "file_uploaded sandbox_id=%s local=%s sandbox=%s size=%d",
+                sandbox_id,
+                local_path,
+                sandbox_path,
+                file_size,
+            )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"File uploaded successfully.\n\n"
+                        f"**Local:** `{local_path}`\n"
+                        f"**Sandbox:** `{sandbox_path}`\n"
+                        f"**Size:** {file_size} bytes"
+                    ),
+                )
+            ]
+
+        elif name == "download_file":
+            sandbox_id = _validate_sandbox_id(arguments)
+            sandbox_path = _validate_relative_path(
+                _require_str(arguments, "sandbox_path")
+            )
+
+            # Determine local destination
+            local_path_str = _optional_str(arguments, "local_path")
+            if local_path_str:
+                local_path = _validate_local_path(local_path_str)
+            else:
+                # Use sandbox file name in current directory
+                local_path = Path.cwd() / Path(sandbox_path).name
+
+            # Download from sandbox
+            sandbox = await get_sandbox(sandbox_id)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                content = await sandbox.filesystem.download(sandbox_path)
+
+            # Check downloaded size
+            if len(content) > _MAX_TRANSFER_FILE_BYTES:
+                raise ValueError(
+                    f"downloaded file too large: {len(content)} bytes "
+                    f"exceeds limit of {_MAX_TRANSFER_FILE_BYTES} bytes"
+                )
+
+            # Create parent directories and write
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(content)
+
+            logger.info(
+                "file_downloaded sandbox_id=%s sandbox=%s local=%s size=%d",
+                sandbox_id,
+                sandbox_path,
+                local_path,
+                len(content),
+            )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"File downloaded successfully.\n\n"
+                        f"**Sandbox:** `{sandbox_path}`\n"
+                        f"**Local:** `{local_path}`\n"
+                        f"**Size:** {len(content)} bytes"
+                    ),
+                )
+            ]
 
         elif name == "list_profiles":
             async with asyncio.timeout(_SDK_CALL_TIMEOUT):

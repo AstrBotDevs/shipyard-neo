@@ -11,8 +11,10 @@ Shipyard Neo 的 MCP (Model Context Protocol) 接入层。
 | `delete_sandbox` | 删除沙箱 |
 | `execute_python` | 执行 Python（支持 `include_code/description/tags`） |
 | `execute_shell` | 执行 Shell（支持 `include_code/description/tags`） |
-| `read_file` | 读取文件 |
-| `write_file` | 写入文件 |
+| `read_file` | 读取文件（文本，sandbox 内） |
+| `write_file` | 写入文件（文本，sandbox 内） |
+| `upload_file` | 上传本地文件到 sandbox（支持二进制） |
+| `download_file` | 从 sandbox 下载文件到本地（支持二进制） |
 | `list_files` | 列目录 |
 | `delete_file` | 删除文件/目录 |
 | `get_execution_history` | 查询执行历史 |
@@ -54,6 +56,7 @@ pip install -e .
 | `SHIPYARD_MAX_TOOL_TEXT_CHARS` | 工具返回文本截断上限（默认 `12000`） | ❌ |
 | `SHIPYARD_SANDBOX_CACHE_SIZE` | sandbox 本地缓存上限（默认 `256`） | ❌ |
 | `SHIPYARD_MAX_WRITE_FILE_BYTES` | `write_file` 写入内容大小上限（默认 `5242880` = 5MB） | ❌ |
+| `SHIPYARD_MAX_TRANSFER_FILE_BYTES` | `upload_file`/`download_file` 文件大小上限（默认 `52428800` = 50MB） | ❌ |
 | `SHIPYARD_SDK_CALL_TIMEOUT` | SDK 调用全局超时秒数（默认 `600`） | ❌ |
 
 ### MCP 配置示例
@@ -94,9 +97,17 @@ pip install -e .
 ### 1) 基础执行流程
 
 1. `create_sandbox`
-2. `write_file` / `execute_python` / `execute_shell`
-3. `read_file`（按需）
+2. `write_file` / `upload_file` / `execute_python` / `execute_shell`
+3. `read_file` / `download_file`（按需）
 4. `delete_sandbox`
+
+### 1.5) 本地文件传输流程
+
+1. `create_sandbox`
+2. `upload_file` — 将本地文件（二进制/文本）上传到 sandbox（例如数据集、图片等）
+3. `execute_python` / `execute_shell` — 在 sandbox 中处理文件
+4. `download_file` — 将处理结果下载到本地
+5. `delete_sandbox`
 
 ### 2) Skills Self-Update 流程
 
@@ -126,6 +137,13 @@ pip install -e .
 - `write_file` 会检查内容 UTF-8 编码后的字节大小。
 - 超过 `SHIPYARD_MAX_WRITE_FILE_BYTES`（默认 5MB）时返回校验错误，防止 Agent 意外写入过大文件。
 
+### 文件传输大小限制
+
+- `upload_file` 和 `download_file` 会检查文件字节大小。
+- 超过 `SHIPYARD_MAX_TRANSFER_FILE_BYTES`（默认 50MB）时返回校验错误。
+- `upload_file` 会验证本地文件存在、是否为常规文件。
+- `download_file` 会自动创建本地目标路径的父目录。
+
 ### SDK 调用超时
 
 - `create_sandbox` / `delete_sandbox` / `get_sandbox` 等底层 SDK 调用统一包裹 `asyncio.timeout`。
@@ -151,6 +169,18 @@ pip install -e .
 - 使用标准 `logging` 模块，logger name = `shipyard_neo_mcp`。
 
 ## 关键工具参数说明
+
+### `upload_file`
+
+- `sandbox_id` (必填)
+- `local_path` (必填，本地文件路径，绝对或相对路径)
+- `sandbox_path` (可选，sandbox 中的目标路径，默认使用本地文件名)
+
+### `download_file`
+
+- `sandbox_id` (必填)
+- `sandbox_path` (必填，sandbox 中的文件路径)
+- `local_path` (可选，本地保存路径，默认保存到当前目录)
 
 ### `execute_python`
 

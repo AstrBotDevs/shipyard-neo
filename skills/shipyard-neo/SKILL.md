@@ -38,7 +38,7 @@ Only a **Ship container** — supports Python, Shell, and Filesystem operations.
 
 | Container | Responsibility | MCP Tools | Cannot Do |
 |-----------|---------------|-----------|-----------|
-| **Ship** | Python / Shell / Filesystem | `execute_python`, `execute_shell`, `read_file`, `write_file`, `list_files`, `delete_file` | No `agent-browser` installed — cannot run browser commands |
+| **Ship** | Python / Shell / Filesystem | `execute_python`, `execute_shell`, `read_file`, `write_file`, `upload_file`, `download_file`, `list_files`, `delete_file` | No `agent-browser` installed — cannot run browser commands |
 | **Gull** | Browser automation | `execute_browser`, `execute_browser_batch` | No Python/Shell — cannot execute code |
 
 **Critical rules**:
@@ -122,14 +122,29 @@ execute_shell(sandbox_id="xxx", command="git init && git add .")
 
 ### 3. File Operations
 
-All paths are **relative to `/workspace`**:
+All sandbox paths are **relative to `/workspace`**:
 
 ```python
+# Text file operations (content passed through MCP protocol)
 write_file(sandbox_id="xxx", path="src/main.py", content="print('hello')")
 read_file(sandbox_id="xxx", path="src/main.py")
 list_files(sandbox_id="xxx", path="src")
 delete_file(sandbox_id="xxx", path="src/temp.py")
+
+# Binary/local file transfer (reads/writes actual files on the MCP server's filesystem)
+upload_file(sandbox_id="xxx", local_path="/path/to/data.csv", sandbox_path="data/input.csv")
+download_file(sandbox_id="xxx", sandbox_path="output/result.png", local_path="./result.png")
 ```
+
+**When to use `upload_file`/`download_file` vs `write_file`/`read_file`**:
+
+| Scenario | Use |
+|----------|-----|
+| Writing text/code content inline | `write_file` |
+| Reading text file content for analysis | `read_file` |
+| Uploading existing local files (images, datasets, archives) | `upload_file` |
+| Downloading binary outputs (images, PDFs, compiled artifacts) | `download_file` |
+| Large files (>5MB text or any binary) | `upload_file`/`download_file` |
 
 ### 4. Browser Automation
 
@@ -190,6 +205,7 @@ See [references/skills-lifecycle.md](references/skills-lifecycle.md) for the com
 | Execution timeout | Single: 1-300s (default 30); Batch: 1-600s (default 60) |
 | Output truncation | Auto-truncated beyond 12,000 characters |
 | write_file limit | 5MB max (UTF-8 encoded) |
+| upload/download limit | 50MB max per file |
 | Browser prefix | **Never** include `agent-browser` prefix |
 | Ref lifecycle | Invalidated after page navigation or DOM changes; always re-snapshot |
 | Container isolation | Ship cannot run browser commands; Gull cannot run Python/Shell |
@@ -198,7 +214,7 @@ See [references/skills-lifecycle.md](references/skills-lifecycle.md) for the com
 
 | Reference | When to Use |
 |-----------|-------------|
-| [references/tools-reference.md](references/tools-reference.md) | Full parameter reference for all 19 MCP tools |
+| [references/tools-reference.md](references/tools-reference.md) | Full parameter reference for all 21 MCP tools |
 | [references/browser.md](references/browser.md) | Browser automation commands, patterns, and troubleshooting |
 | [references/skills-lifecycle.md](references/skills-lifecycle.md) | Skill candidate → evaluate → promote → rollback workflow |
 | [references/sandbox-environment.md](references/sandbox-environment.md) | Ship/Gull container pre-installed environment and capability details |

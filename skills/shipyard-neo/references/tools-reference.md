@@ -122,6 +122,37 @@ Delete a file or directory from the sandbox workspace.
 | `sandbox_id` | string | Yes | Target sandbox |
 | `path` | string | Yes | Path to delete, relative to `/workspace` |
 
+### `upload_file`
+
+Upload a local file to a sandbox workspace. Reads a file from the local filesystem (where the MCP server runs) and uploads it to the sandbox. Supports binary files (images, PDFs, archives, etc.).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sandbox_id` | string | Yes | — | Target sandbox |
+| `local_path` | string | Yes | — | Absolute or relative path to the local file. Relative paths are resolved from the MCP server's working directory. |
+| `sandbox_path` | string | No | *(local filename)* | Target path in the sandbox workspace, relative to `/workspace`. If not provided, uses the local file's name. |
+
+**Returns**: Local path, sandbox path, and file size in bytes.
+
+**Constraints**:
+- Max file size: 50MB (configurable via `SHIPYARD_MAX_TRANSFER_FILE_BYTES`)
+- Local file must exist and be a regular file
+
+### `download_file`
+
+Download a file from a sandbox workspace to the local filesystem. Supports binary files (images, PDFs, archives, etc.).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sandbox_id` | string | Yes | — | Target sandbox |
+| `sandbox_path` | string | Yes | — | File path in the sandbox, relative to `/workspace` |
+| `local_path` | string | No | *(cwd/filename)* | Local destination path. Absolute or relative to the MCP server's working directory. Parent directories are created automatically. If not provided, saves to the current directory using the sandbox file's name. |
+
+**Returns**: Sandbox path, local path, and file size in bytes.
+
+**Constraints**:
+- Max downloaded file size: 50MB (configurable via `SHIPYARD_MAX_TRANSFER_FILE_BYTES`)
+
 ---
 
 ## Browser Automation
