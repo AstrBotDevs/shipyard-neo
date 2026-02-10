@@ -325,10 +325,12 @@ async def health() -> HealthResponse:
         timeout=5,
     )
 
-    browser_active = SESSION_NAME in stdout if code == 0 else False
+    probe_ok = code == 0
+    browser_active = SESSION_NAME in stdout if probe_ok else False
+    status = "healthy" if probe_ok else "degraded"
 
     return HealthResponse(
-        status="healthy" if agent_browser_available else "unhealthy",
+        status=status,
         browser_active=browser_active,
         session=SESSION_NAME,
     )
