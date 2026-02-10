@@ -15,7 +15,7 @@ Shipyard Neo 由控制面 **Bay** 与数据面运行时 **Ship** / **Gull** 组�
 - **Gull**：浏览器运行时，以“CLI 透传”方式执行 `agent-browser` 命令（HTTP 封装）。
 - **Cargo**：持久化存储卷（Docker Volume / K8s PVC），挂载到 `/workspace`，在 Ship 与 Gull 之间共享。
 
-整体视角参考：[`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:1) 与 [`doc/ship_architecture.md`](doc/ship_architecture.md:1)。
+整体视角参考：[`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md) 与 [`doc/ship_architecture.md`](doc/ship_architecture.md)。
 
 ---
 
@@ -23,14 +23,14 @@ Shipyard Neo 由控制面 **Bay** 与数据面运行时 **Ship** / **Gull** 组�
 
 ### 2.1 Sandbox / Session / Cargo
 
-- **Sandbox（稳定 ID）**：对外唯一计算资源单元，聚合 Profile、Cargo 与当前 Session；支持 TTL。状态由当前 Session 计算得出。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:9)。
-- **Session（临时会话）**：代表一组运行中的容器实例，可能被系统按策略回收/重建，但对 Sandbox 客户端透明。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:18)。
-- **Cargo（持久化工作区）**：存储卷，固定挂载到 `/workspace`，用于跨 Session/容器共享与持久化数据。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:27)。
+- **Sandbox（稳定 ID）**：对外唯一计算资源单元，聚合 Profile、Cargo 与当前 Session；支持 TTL。状态由当前 Session 计算得出。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)。
+- **Session（临时会话）**：代表一组运行中的容器实例，可能被系统按策略回收/重建，但对 Sandbox 客户端透明。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)。
+- **Cargo（持久化工作区）**：存储卷，固定挂载到 `/workspace`，用于跨 Session/容器共享与持久化数据。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)。
 
 ### 2.2 Profile / Capability Router
 
-- **Profile**：定义容器拓扑、资源限制、能力集合（python/shell/filesystem/browser）与空闲回收策略。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:51)。
-- **Capability Router**：按能力类型将请求路由到提供该能力的容器与适配器（ShipAdapter / GullAdapter）。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:82)。
+- **Profile**：定义容器拓扑、资源限制、能力集合（python/shell/filesystem/browser）与空闲回收策略。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)。
+- **Capability Router**：按能力类型将请求路由到提供该能力的容器与适配器（ShipAdapter / GullAdapter）。详见 [`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)。
 
 ---
 
@@ -43,15 +43,15 @@ Bay API v1 是控制面 REST API，覆盖：
 - History：执行历史查询与标注
 - Skills：Candidate → Evaluate → Promote → Release → Rollback
 
-完整参考：[`doc/bay_api_v1.md`](doc/bay_api_v1.md:1)
+完整参考：[`doc/bay_api_v1.md`](doc/bay_api_v1.md)
 
-错误语义与错误码：[`doc/bay_error_codes.md`](doc/bay_error_codes.md:1)
+错误语义与错误码：[`doc/bay_error_codes.md`](doc/bay_error_codes.md)
 
 ---
 
 ## 4. 浏览器自动化（Gull 透传 agent-browser）
 
-浏览器能力由 Gull 运行时提供，使用“CLI 透传”将 `agent-browser` 子命令暴露为 HTTP API。架构与实现细节见：[`doc/gull_browser_runtime.md`](doc/gull_browser_runtime.md:1)
+浏览器能力由 Gull 运行时提供，使用“CLI 透传”将 `agent-browser` 子命令暴露为 HTTP API。架构与实现细节见：[`doc/gull_browser_runtime.md`](doc/gull_browser_runtime.md)
 
 ### 4.1 最关键约定（避免 80% 的失败）
 
@@ -60,13 +60,13 @@ Bay API v1 是控制面 REST API，覆盖：
 3. `cmd` **不是 shell**：不要使用 `>`, `|`, `&&`, `;` 等 shell 语法；需要落盘时，应先拿到 stdout，再通过 filesystem 写文件。
 4. **ref（`@e1/@e2/...`）在页面变化后会失效**：导航/提交表单/明显 DOM 变化后必须重新 `snapshot -i`。
 
-面向工程实践的操作指南：[`doc/agent_browser_guide.md`](doc/agent_browser_guide.md:1)
+面向工程实践的操作指南：[`doc/agent_browser_guide.md`](doc/agent_browser_guide.md)
 
 ---
 
 ## 5. Ship 运行时与安全模型
 
-Ship 运行时提供：Filesystem CRUD、IPython 执行、Shell 执行、WebSocket 终端等能力。组件与接口梳理见：[`doc/ship_architecture.md`](doc/ship_architecture.md:1)
+Ship 运行时提供：Filesystem CRUD、IPython 执行、Shell 执行、WebSocket 终端等能力。组件与接口梳理见：[`doc/ship_architecture.md`](doc/ship_architecture.md)
 
 安全要点（摘要）：
 
@@ -83,7 +83,7 @@ Shipyard Neo 提供的是 self-update 的“基础设施”，而不是固定训
 - **技能控制面**：Candidate → Evaluation → Release（canary/stable）→ Rollback。
 - **多入口**：REST API / Python SDK / MCP Tools。
 
-工程化落地指南：[`doc/skills_self_update_guide_zh.md`](doc/skills_self_update_guide_zh.md:1)
+工程化落地指南：[`doc/skills_self_update_guide_zh.md`](doc/skills_self_update_guide_zh.md)
 
 ---
 
@@ -134,10 +134,10 @@ Shipyard Neo 提供的是 self-update 的“基础设施”，而不是固定训
 
 ## 9. 推荐阅读路径（从 0 到能用）
 
-1. 概念与实体关系：[`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md:1)
-2. API 总览与细节：[`doc/bay_api_v1.md`](doc/bay_api_v1.md:1)
-3. 错误码与排障：[`doc/bay_error_codes.md`](doc/bay_error_codes.md:1)
-4. 浏览器运行时（实现与部署）：[`doc/gull_browser_runtime.md`](doc/gull_browser_runtime.md:1)
-5. 浏览器操作规范（透传约束与工作流）：[`doc/agent_browser_guide.md`](doc/agent_browser_guide.md:1)
-6. Ship 运行时与安全模型：[`doc/ship_architecture.md`](doc/ship_architecture.md:1)
-7. self-update 闭环落地：[`doc/skills_self_update_guide_zh.md`](doc/skills_self_update_guide_zh.md:1)
+1. 概念与实体关系：[`doc/bay_abstract_entities.md`](doc/bay_abstract_entities.md)
+2. API 总览与细节：[`doc/bay_api_v1.md`](doc/bay_api_v1.md)
+3. 错误码与排障：[`doc/bay_error_codes.md`](doc/bay_error_codes.md)
+4. 浏览器运行时（实现与部署）：[`doc/gull_browser_runtime.md`](doc/gull_browser_runtime.md)
+5. 浏览器操作规范（透传约束与工作流）：[`doc/agent_browser_guide.md`](doc/agent_browser_guide.md)
+6. Ship 运行时与安全模型：[`doc/ship_architecture.md`](doc/ship_architecture.md)
+7. self-update 闭环落地：[`doc/skills_self_update_guide_zh.md`](doc/skills_self_update_guide_zh.md)
