@@ -755,3 +755,175 @@ async def test_list_profiles_empty():
 
     response = await mcp_server.call_tool("list_profiles", {})
     assert response[0].text == "No profiles available."
+
+
+# -- Guardrail tests --
+
+
+@pytest.mark.asyncio
+async def test_sandbox_id_format_validation_rejects_invalid():
+    """sandbox_id with special characters should be rejected."""
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "../../../etc/passwd", "code": "print('x')"},
+    )
+    assert "invalid sandbox_id format" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_sandbox_id_format_validation_rejects_empty():
+    """Empty sandbox_id should be rejected."""
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "", "code": "print('x')"},
+    )
+    assert "missing required field" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_sandbox_id_format_validation_rejects_too_long():
+    """sandbox_id longer than 128 chars should be rejected."""
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "a" * 129, "code": "print('x')"},
+    )
+    assert "invalid sandbox_id format" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_sandbox_id_format_validation_accepts_valid():
+    """Valid sandbox_id patterns should pass validation."""
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-123_test"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "sbx-123_test", "code": "print('ok')"},
+    )
+    assert "Execution successful" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_write_file_rejects_oversized_content(monkeypatch):
+    """write_file should reject content exceeding SHIPYARD_MAX_WRITE_FILE_BYTES."""
+    monkeypatch.setattr(mcp_server, "_MAX_WRITE_FILE_BYTES", 100)
+    mcp_server._sandboxes["sbx-1"] = FakeSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "write_file",
+        {"sandbox_id": "sbx-1", "path": "test.txt", "content": "x" * 200},
+    )
+    assert "write_file content too large" in response[0].text
+    assert "exceeds limit" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_write_file_accepts_content_within_limit(monkeypatch):
+    """write_file should accept content within limit."""
+    monkeypatch.setattr(mcp_server, "_MAX_WRITE_FILE_BYTES", 1000)
+    mcp_server._sandboxes["sbx-1"] = FakeSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "write_file",
+        {"sandbox_id": "sbx-1", "path": "test.txt", "content": "hello"},
+    )
+    assert "written successfully" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_timeout_error_returns_friendly_message():
+    """TimeoutError from SDK calls should return a friendly message."""
+    class TimeoutSandbox(FakeSandbox):
+        class TimeoutPython:
+            async def exec(self, *_args, **_kwargs):
+                raise TimeoutError("timed out")
+        def __init__(self):
+            super().__init__()
+            self.python = self.TimeoutPython()
+
+    mcp_server._sandboxes["sbx-1"] = TimeoutSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_python",
+        {"sandbox_id": "sbx-1", "code": "print('x')"},
+    )
+    assert "Timeout Error" in response[0].text
+
+
+def test_validate_sandbox_id_accepts_hyphens_and_underscores():
+    """_validate_sandbox_id should accept alphanumeric, hyphens, underscores."""
+    result = mcp_server._validate_sandbox_id({"sandbox_id": "sbx-123_test"})
+    assert result == "sbx-123_test"
+
+
+def test_validate_sandbox_id_rejects_dots():
+    """_validate_sandbox_id should reject dots."""
+    with pytest.raises(ValueError, match="invalid sandbox_id format"):
+        mcp_server._validate_sandbox_id({"sandbox_id": "sbx.123"})
+
+
+def test_validate_sandbox_id_rejects_spaces():
+    """_validate_sandbox_id should reject spaces."""
+    with pytest.raises(ValueError, match="invalid sandbox_id format"):
+        mcp_server._validate_sandbox_id({"sandbox_id": "sbx 123"})
+
+
+def test_cache_eviction_logs_evicted_id(monkeypatch, caplog):
+    """Cache eviction should log the evicted sandbox ID."""
+    import logging
+
+    monkeypatch.setattr(mcp_server, "_MAX_SANDBOX_CACHE_SIZE", 1)
+    mcp_server._sandboxes = OrderedDict()
+
+    with caplog.at_level(logging.DEBUG, logger="shipyard_neo_mcp"):
+        mcp_server._cache_sandbox(SimpleNamespace(id="sbx-1"))
+        mcp_server._cache_sandbox(SimpleNamespace(id="sbx-2"))
+
+    assert "cache_evict" in caplog.text
+    assert "sbx-1" in caplog.text
+    assert list(mcp_server._sandboxes.keys()) == ["sbx-2"]
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_logs_info(caplog, monkeypatch):
+    """create_sandbox should log sandbox creation."""
+    import logging
+
+    monkeypatch.setenv("SHIPYARD_ENDPOINT_URL", "http://localhost:8000")
+    monkeypatch.setenv("SHIPYARD_ACCESS_TOKEN", "test-token")
+    mcp_server._client = FakeClient()
+
+    with caplog.at_level(logging.INFO, logger="shipyard_neo_mcp"):
+        response = await mcp_server.call_tool("create_sandbox", {})
+
+    assert "sandbox_created" in caplog.text
+    assert "sbx-new" in caplog.text
+    assert "Sandbox created successfully" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_delete_sandbox_logs_info(caplog):
+    """delete_sandbox should log sandbox deletion."""
+    import logging
+
+    mcp_server._sandboxes["sbx-1"] = FakeSandbox()
+    mcp_server._client = FakeClient()
+
+    with caplog.at_level(logging.INFO, logger="shipyard_neo_mcp"):
+        response = await mcp_server.call_tool(
+            "delete_sandbox", {"sandbox_id": "sbx-1"}
+        )
+
+    assert "sandbox_deleted" in caplog.text
+    assert "sbx-1" in caplog.text
+    assert "deleted successfully" in response[0].text

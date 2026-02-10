@@ -53,6 +53,8 @@ pip install -e .
 | `SHIPYARD_DEFAULT_TTL` | 默认 TTL 秒数（默认 `3600`） | ❌ |
 | `SHIPYARD_MAX_TOOL_TEXT_CHARS` | 工具返回文本截断上限（默认 `12000`） | ❌ |
 | `SHIPYARD_SANDBOX_CACHE_SIZE` | sandbox 本地缓存上限（默认 `256`） | ❌ |
+| `SHIPYARD_MAX_WRITE_FILE_BYTES` | `write_file` 写入内容大小上限（默认 `5242880` = 5MB） | ❌ |
+| `SHIPYARD_SDK_CALL_TIMEOUT` | SDK 调用全局超时秒数（默认 `600`） | ❌ |
 
 ### MCP 配置示例
 
@@ -107,10 +109,46 @@ pip install -e .
 
 ## 运行时防护（Guardrails）
 
-- 参数校验：缺少必填字段或类型不合法时，返回 `**Validation Error:** ...`，不会暴露底层 `KeyError`。
-- 输出截断：`execute_python` / `execute_shell` / `read_file` / 执行详情查询会统一截断超长内容，避免上下文爆炸。
-- API 错误透出：`BayError` 会输出 `code + message + details(截断)`，便于上层 Agent 分支决策。
-- 缓存淘汰：sandbox 缓存采用有界策略，超过 `SHIPYARD_SANDBOX_CACHE_SIZE` 后按最久未使用项淘汰。
+### 参数校验
+
+- 缺少必填字段或类型不合法时，返回 `**Validation Error:** ...`，不会暴露底层 `KeyError`。
+- 所有 `sandbox_id` 经过正则格式校验（`^[a-zA-Z0-9_-]{1,128}$`），拒绝路径穿越等注入攻击。
+- 枚举值（`exec_type`、`stage`）和数值范围（`limit`、`timeout`）有白名单/边界检查。
+
+### 输出截断
+
+- `execute_python` / `execute_shell` / `read_file` / 执行详情查询会统一截断超长内容，避免上下文爆炸。
+- 截断上限由 `SHIPYARD_MAX_TOOL_TEXT_CHARS` 控制（默认 12000 字符）。
+- 截断后追加 `...[truncated N chars; original=M]` 标记，保留可观测性。
+
+### 写入大小限制
+
+- `write_file` 会检查内容 UTF-8 编码后的字节大小。
+- 超过 `SHIPYARD_MAX_WRITE_FILE_BYTES`（默认 5MB）时返回校验错误，防止 Agent 意外写入过大文件。
+
+### SDK 调用超时
+
+- `create_sandbox` / `delete_sandbox` / `get_sandbox` 等底层 SDK 调用统一包裹 `asyncio.timeout`。
+- 超时上限由 `SHIPYARD_SDK_CALL_TIMEOUT` 控制（默认 600 秒）。
+- 超时后返回 `**Timeout Error:** SDK call timed out after Ns`，防止无限阻塞。
+
+### API 错误透出
+
+- `BayError` 会输出 `code + message + details(截断)`，便于上层 Agent 分支决策。
+- `details` 截断到 1000 字符，避免过大错误详情占据上下文。
+
+### 并发安全 & 缓存淘汰
+
+- sandbox 对象缓存使用 `asyncio.Lock` 保护读写操作，防止并发竞态条件。
+- 缓存采用有界 LRU 策略（`OrderedDict`），超过 `SHIPYARD_SANDBOX_CACHE_SIZE`（默认 256）后按最久未使用项淘汰。
+- 淘汰事件写入 DEBUG 日志。
+
+### 结构化日志
+
+- 关键操作（`sandbox_created`、`sandbox_deleted`）写入 INFO 日志。
+- 异常（`bay_error`、`tool_timeout`、`unexpected_error`）写入 WARNING/ERROR 日志。
+- 缓存淘汰（`cache_evict`）写入 DEBUG 日志。
+- 使用标准 `logging` 模块，logger name = `shipyard_neo_mcp`。
 
 ## 关键工具参数说明
 

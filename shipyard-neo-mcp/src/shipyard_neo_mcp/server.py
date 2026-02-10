@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
 import sys
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -24,9 +26,21 @@ from mcp.types import (
 from shipyard_neo import BayClient, BayError
 
 
+logger = logging.getLogger("shipyard_neo_mcp")
+
+
 # Global client instance (managed by lifespan)
 _client: BayClient | None = None
 _sandboxes: OrderedDict[str, Any] = OrderedDict()  # Cache sandbox objects by ID
+_sandboxes_lock: asyncio.Lock | None = None  # Initialized lazily
+
+
+def _get_lock() -> asyncio.Lock:
+    """Return the sandbox cache lock, creating it lazily if needed."""
+    global _sandboxes_lock
+    if _sandboxes_lock is None:
+        _sandboxes_lock = asyncio.Lock()
+    return _sandboxes_lock
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
@@ -44,6 +58,11 @@ def _read_positive_int_env(name: str, default: int) -> int:
 
 _MAX_TOOL_TEXT_CHARS = _read_positive_int_env("SHIPYARD_MAX_TOOL_TEXT_CHARS", 12000)
 _MAX_SANDBOX_CACHE_SIZE = _read_positive_int_env("SHIPYARD_SANDBOX_CACHE_SIZE", 256)
+_MAX_WRITE_FILE_BYTES = _read_positive_int_env("SHIPYARD_MAX_WRITE_FILE_BYTES", 5 * 1024 * 1024)
+_SDK_CALL_TIMEOUT = _read_positive_int_env("SHIPYARD_SDK_CALL_TIMEOUT", 600)
+
+# Sandbox ID format: alphanumeric + hyphens + underscores, 1-128 chars
+_SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 
 def _truncate_text(text: str | None, *, limit: int = _MAX_TOOL_TEXT_CHARS) -> str:
@@ -61,6 +80,16 @@ def _require_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"missing required field: {key}")
     return value
+
+
+def _validate_sandbox_id(arguments: dict[str, Any]) -> str:
+    """Extract and validate sandbox_id format to prevent injection."""
+    sandbox_id = _require_str(arguments, "sandbox_id")
+    if not _SANDBOX_ID_RE.match(sandbox_id):
+        raise ValueError(
+            "invalid sandbox_id format: must be 1-128 alphanumeric/hyphen/underscore characters"
+        )
+    return sandbox_id
 
 
 def _optional_str(arguments: dict[str, Any], key: str) -> str | None:
@@ -157,7 +186,8 @@ def _cache_sandbox(sandbox: Any) -> None:
         _sandboxes.move_to_end(sandbox_id)
     _sandboxes[sandbox_id] = sandbox
     while len(_sandboxes) > _MAX_SANDBOX_CACHE_SIZE:
-        _sandboxes.popitem(last=False)
+        evicted_id, _ = _sandboxes.popitem(last=False)
+        logger.debug("cache_evict sandbox_id=%s cache_size=%d", evicted_id, len(_sandboxes))
 
 
 def _format_bay_error(error: BayError) -> str:
@@ -649,19 +679,24 @@ async def list_tools() -> list[Tool]:
 
 
 async def get_sandbox(sandbox_id: str):
-    """Get or fetch a sandbox by ID."""
+    """Get or fetch a sandbox by ID with cache lock protection."""
     global _client, _sandboxes
 
     if _client is None:
         raise RuntimeError("BayClient not initialized")
 
-    if sandbox_id in _sandboxes:
-        _sandboxes.move_to_end(sandbox_id)
-        return _sandboxes[sandbox_id]
+    lock = _get_lock()
+    async with lock:
+        if sandbox_id in _sandboxes:
+            _sandboxes.move_to_end(sandbox_id)
+            return _sandboxes[sandbox_id]
 
-    # Fetch from server
-    sandbox = await _client.get_sandbox(sandbox_id)
-    _cache_sandbox(sandbox)
+    # Fetch from server (outside lock to avoid holding it during I/O)
+    async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+        sandbox = await _client.get_sandbox(sandbox_id)
+
+    async with lock:
+        _cache_sandbox(sandbox)
     return sandbox
 
 
@@ -681,8 +716,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 raise ValueError("field 'profile' must be a non-empty string")
             ttl = _read_int(arguments, "ttl", config["default_ttl"], min_value=0)
 
-            sandbox = await _client.create_sandbox(profile=profile, ttl=ttl)
-            _cache_sandbox(sandbox)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                sandbox = await _client.create_sandbox(profile=profile, ttl=ttl)
+            async with _get_lock():
+                _cache_sandbox(sandbox)
+
+            logger.info(
+                "sandbox_created sandbox_id=%s profile=%s ttl=%d",
+                sandbox.id, sandbox.profile, ttl,
+            )
 
             return [
                 TextContent(
@@ -698,10 +740,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "delete_sandbox":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             sandbox = await get_sandbox(sandbox_id)
-            await sandbox.delete()
-            _sandboxes.pop(sandbox_id, None)
+            async with asyncio.timeout(_SDK_CALL_TIMEOUT):
+                await sandbox.delete()
+            async with _get_lock():
+                _sandboxes.pop(sandbox_id, None)
+
+            logger.info("sandbox_deleted sandbox_id=%s", sandbox_id)
 
             return [
                 TextContent(
@@ -711,7 +757,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "execute_python":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             code = _require_str(arguments, "code")
             timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
             include_code = _read_bool(arguments, "include_code", False)
@@ -755,7 +801,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 ]
 
         elif name == "execute_shell":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             command = _require_str(arguments, "command")
             cwd = _optional_str(arguments, "cwd")
             timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
@@ -792,7 +838,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "read_file":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             path = _require_str(arguments, "path")
 
             sandbox = await get_sandbox(sandbox_id)
@@ -806,9 +852,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "write_file":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             path = _require_str(arguments, "path")
             content = _require_str(arguments, "content")
+
+            content_bytes = len(content.encode("utf-8"))
+            if content_bytes > _MAX_WRITE_FILE_BYTES:
+                raise ValueError(
+                    f"write_file content too large: {content_bytes} bytes "
+                    f"exceeds limit of {_MAX_WRITE_FILE_BYTES} bytes"
+                )
 
             sandbox = await get_sandbox(sandbox_id)
             await sandbox.filesystem.write_file(path, content)
@@ -821,7 +874,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "list_files":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             path = arguments.get("path", ".")
             if not isinstance(path, str):
                 raise ValueError("field 'path' must be a string")
@@ -848,7 +901,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "delete_file":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             path = _require_str(arguments, "path")
 
             sandbox = await get_sandbox(sandbox_id)
@@ -862,7 +915,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "get_execution_history":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             sandbox = await get_sandbox(sandbox_id)
 
             history = await sandbox.get_execution_history(
@@ -889,7 +942,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "get_execution":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             execution_id = _require_str(arguments, "execution_id")
             sandbox = await get_sandbox(sandbox_id)
             entry = await sandbox.get_execution(execution_id)
@@ -912,7 +965,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "get_last_execution":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             sandbox = await get_sandbox(sandbox_id)
             entry = await sandbox.get_last_execution(
                 exec_type=_read_exec_type(arguments, "exec_type")
@@ -931,7 +984,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "annotate_execution":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             execution_id = _require_str(arguments, "execution_id")
             sandbox = await get_sandbox(sandbox_id)
             entry = await sandbox.annotate_execution(
@@ -1067,7 +1120,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "execute_browser":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             cmd = _require_str(arguments, "cmd")
             timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
 
@@ -1092,7 +1145,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             ]
 
         elif name == "execute_browser_batch":
-            sandbox_id = _require_str(arguments, "sandbox_id")
+            sandbox_id = _validate_sandbox_id(arguments)
             commands = _require_str_list(arguments, "commands")
             timeout = _read_int(arguments, "timeout", 60, min_value=1, max_value=600)
             stop_on_error = _read_bool(arguments, "stop_on_error", True)
@@ -1142,9 +1195,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     except ValueError as e:
         return [TextContent(type="text", text=f"**Validation Error:** {e!s}")]
+    except TimeoutError:
+        logger.warning("tool_timeout tool=%s timeout=%ds", name, _SDK_CALL_TIMEOUT)
+        return [
+            TextContent(
+                type="text",
+                text=f"**Timeout Error:** SDK call timed out after {_SDK_CALL_TIMEOUT}s",
+            )
+        ]
     except BayError as e:
+        logger.warning("bay_error tool=%s code=%s message=%s", name, e.code, e.message)
         return [TextContent(type="text", text=_format_bay_error(e))]
     except Exception as e:
+        logger.exception("unexpected_error tool=%s", name)
         return [TextContent(type="text", text=f"**Error:** {e!s}")]
 
 
