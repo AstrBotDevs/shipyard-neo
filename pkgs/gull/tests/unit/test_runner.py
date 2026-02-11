@@ -184,7 +184,9 @@ async def test_exec_batch_uses_remaining_budget_without_forced_minimum(
 
 
 @pytest.mark.asyncio
-async def test_health_unhealthy_when_agent_browser_missing(monkeypatch: pytest.MonkeyPatch):
+async def test_health_unhealthy_when_agent_browser_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr(gull_main.shutil, "which", lambda _name: None)
 
     response = await gull_main.health()
@@ -195,7 +197,9 @@ async def test_health_unhealthy_when_agent_browser_missing(monkeypatch: pytest.M
 
 @pytest.mark.asyncio
 async def test_health_healthy_when_probe_succeeds(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser")
+    monkeypatch.setattr(
+        gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser"
+    )
 
     async def fake_run(_cmd: str, **_kwargs):
         return gull_main.SESSION_NAME, "", 0
@@ -210,7 +214,9 @@ async def test_health_healthy_when_probe_succeeds(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_health_degraded_when_probe_fails(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser")
+    monkeypatch.setattr(
+        gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser"
+    )
 
     async def fake_run(_cmd: str, **_kwargs):
         return "", "probe failed", 2

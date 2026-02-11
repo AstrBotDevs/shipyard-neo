@@ -50,6 +50,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     git \
+    # 压缩/解压工具
+    zip \
+    unzip \
     # 调试工具（可选，生产环境可移除）
     vim-tiny \
     nano \

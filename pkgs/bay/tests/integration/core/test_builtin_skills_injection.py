@@ -81,7 +81,9 @@ async def test_builtin_skills_injected_on_first_exec():
 
             # Verify .skills directory exists
             result = await _exec_shell(
-                client, sid, f"test -d /workspace/{SKILL_MARKER} && echo EXISTS",
+                client,
+                sid,
+                f"test -d /workspace/{SKILL_MARKER} && echo EXISTS",
             )
             assert result["success"] is True
             assert "EXISTS" in result["output"]

@@ -349,7 +349,10 @@ async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
         results=results,
         total_steps=len(request.commands),
         completed_steps=len(results),
-        success=(len(results) == len(request.commands) and all(r.exit_code == 0 for r in results)),
+        success=(
+            len(results) == len(request.commands)
+            and all(r.exit_code == 0 for r in results)
+        ),
         duration_ms=total_duration_ms,
     )
 

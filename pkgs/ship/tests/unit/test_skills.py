@@ -150,9 +150,7 @@ description: Python execution environment
         """Should use directory name when frontmatter has no 'name' field."""
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\ndescription: no name field\n---\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\ndescription: no name field\n---\n")
 
         result = _scan_built_in_skills(root=tmp_path)
 
