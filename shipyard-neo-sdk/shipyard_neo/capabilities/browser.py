@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from shipyard_neo.capabilities.base import BaseCapability
-from shipyard_neo.types import BrowserBatchExecResult, BrowserExecResult
+from shipyard_neo.types import (
+    BrowserBatchExecResult,
+    BrowserExecResult,
+    BrowserSkillRunResult,
+)
 
 
 class BrowserCapability(BaseCapability):
@@ -17,6 +21,10 @@ class BrowserCapability(BaseCapability):
         cmd: str,
         *,
         timeout: int = 30,
+        description: str | None = None,
+        tags: str | None = None,
+        learn: bool = False,
+        include_trace: bool = False,
     ) -> BrowserExecResult:
         """Execute a browser automation command in the sandbox.
 
@@ -34,7 +42,14 @@ class BrowserCapability(BaseCapability):
         """
         from shipyard_neo.types import _BrowserExecRequest
 
-        body = _BrowserExecRequest(cmd=cmd, timeout=timeout).model_dump(exclude_none=True)
+        body = _BrowserExecRequest(
+            cmd=cmd,
+            timeout=timeout,
+            description=description,
+            tags=tags,
+            learn=learn,
+            include_trace=include_trace,
+        ).model_dump(exclude_none=True)
 
         response = await self._http.post(
             f"{self._base_path}/browser/exec",
@@ -50,6 +65,10 @@ class BrowserCapability(BaseCapability):
         *,
         timeout: int = 60,
         stop_on_error: bool = True,
+        description: str | None = None,
+        tags: str | None = None,
+        learn: bool = False,
+        include_trace: bool = False,
     ) -> BrowserBatchExecResult:
         """Execute a batch of browser automation commands in the sandbox.
 
@@ -76,6 +95,10 @@ class BrowserCapability(BaseCapability):
             commands=commands,
             timeout=timeout,
             stop_on_error=stop_on_error,
+            description=description,
+            tags=tags,
+            learn=learn,
+            include_trace=include_trace,
         ).model_dump(exclude_none=True)
 
         response = await self._http.post(
@@ -85,3 +108,31 @@ class BrowserCapability(BaseCapability):
         )
 
         return BrowserBatchExecResult.model_validate(response)
+
+    async def run_skill(
+        self,
+        skill_key: str,
+        *,
+        timeout: int = 60,
+        stop_on_error: bool = True,
+        include_trace: bool = False,
+        description: str | None = None,
+        tags: str | None = None,
+    ) -> BrowserSkillRunResult:
+        """Replay active browser skill release in this sandbox."""
+        from shipyard_neo.types import _BrowserSkillRunRequest
+
+        body = _BrowserSkillRunRequest(
+            timeout=timeout,
+            stop_on_error=stop_on_error,
+            include_trace=include_trace,
+            description=description,
+            tags=tags,
+        ).model_dump(exclude_none=True)
+
+        response = await self._http.post(
+            f"{self._base_path}/browser/skills/{skill_key}/run",
+            json=body,
+            timeout=float(timeout) + 15,
+        )
+        return BrowserSkillRunResult.model_validate(response)

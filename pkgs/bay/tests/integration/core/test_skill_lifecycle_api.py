@@ -219,3 +219,43 @@ async def test_skill_api_validation_errors():
                 json={"stage": "invalid-stage"},
             )
             assert bad_stage_promote.status_code == 400
+
+
+async def test_release_health_endpoint_returns_policy_metrics():
+    """Release health endpoint should expose canary metrics and rollback policy fields."""
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with create_sandbox(client) as sandbox:
+            sandbox_id = sandbox["id"]
+            exec_id = await _create_python_execution(client, sandbox_id, "print('health-release')")
+
+            candidate_resp = await client.post(
+                "/v1/skills/candidates",
+                json={
+                    "skill_key": "health-check-skill",
+                    "source_execution_ids": [exec_id],
+                },
+            )
+            assert candidate_resp.status_code == 201
+            candidate_id = candidate_resp.json()["id"]
+
+            evaluate_resp = await client.post(
+                f"/v1/skills/candidates/{candidate_id}/evaluate",
+                json={"passed": True, "score": 0.95},
+            )
+            assert evaluate_resp.status_code == 200
+
+            promote_resp = await client.post(
+                f"/v1/skills/candidates/{candidate_id}/promote",
+                json={"stage": "canary"},
+            )
+            assert promote_resp.status_code == 200
+            release_id = promote_resp.json()["id"]
+
+            health_resp = await client.get(f"/v1/skills/releases/{release_id}/health")
+            assert health_resp.status_code == 200
+            data = health_resp.json()
+            assert data["release_id"] == release_id
+            assert "success_rate" in data
+            assert "error_rate" in data
+            assert "p95_duration" in data
+            assert "should_rollback" in data

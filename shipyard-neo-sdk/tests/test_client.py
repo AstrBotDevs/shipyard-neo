@@ -1,8 +1,10 @@
 """Tests for BayClient."""
 
+import json
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from shipyard_neo import BayClient
 from shipyard_neo.errors import NotFoundError
@@ -345,6 +347,9 @@ class TestBayClient:
                 "output": "Page loaded: https://example.com",
                 "error": None,
                 "exit_code": 0,
+                "execution_id": "exec-browser-1",
+                "execution_time_ms": 18,
+                "trace_ref": "blob:trace-1",
             },
             status_code=200,
         )
@@ -359,6 +364,9 @@ class TestBayClient:
             assert result.output == "Page loaded: https://example.com"
             assert result.exit_code == 0
             assert result.error is None
+            assert result.execution_id == "exec-browser-1"
+            assert result.execution_time_ms == 18
+            assert result.trace_ref == "blob:trace-1"
 
     @pytest.mark.asyncio
     async def test_browser_exec_with_timeout(self, httpx_mock, mock_sandbox_response):
@@ -392,6 +400,90 @@ class TestBayClient:
             )
             assert result.success is False
             assert result.error == "Navigation timeout exceeded"
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_forwards_learning_fields(self, httpx_mock, mock_sandbox_response):
+        """Browser exec should forward description/tags/learn/include_trace."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/exec",
+            json={
+                "success": True,
+                "output": "ok",
+                "error": None,
+                "exit_code": 0,
+                "execution_id": "exec-browser-2",
+                "execution_time_ms": 9,
+                "trace_ref": "blob:trace-2",
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.exec(
+                "snapshot -i",
+                description="capture controls",
+                tags="browser,trace",
+                learn=True,
+                include_trace=True,
+            )
+            assert result.execution_id == "exec-browser-2"
+            assert result.trace_ref == "blob:trace-2"
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["description"] == "capture controls"
+        assert body["tags"] == "browser,trace"
+        assert body["learn"] is True
+        assert body["include_trace"] is True
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_sends_default_learning_flags(self, httpx_mock, mock_sandbox_response):
+        """Browser exec should keep explicit default flags in request body."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/exec",
+            json={
+                "success": True,
+                "output": "ok",
+                "error": None,
+                "exit_code": 0,
+                "execution_id": "exec-browser-defaults",
+                "execution_time_ms": 8,
+                "trace_ref": None,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.exec("snapshot -i")
+            assert result.execution_id == "exec-browser-defaults"
+            assert result.trace_ref is None
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["learn"] is False
+        assert body["include_trace"] is False
 
     @pytest.mark.asyncio
     async def test_list_profiles(self, httpx_mock):
@@ -476,6 +568,9 @@ class TestBayClient:
                 "completed_steps": 3,
                 "success": True,
                 "duration_ms": 250,
+                "execution_id": "exec-browser-batch-1",
+                "execution_time_ms": 255,
+                "trace_ref": "blob:trace-batch-1",
             },
             status_code=200,
         )
@@ -497,6 +592,9 @@ class TestBayClient:
             assert result.total_steps == 3
             assert result.completed_steps == 3
             assert result.duration_ms == 250
+            assert result.execution_id == "exec-browser-batch-1"
+            assert result.execution_time_ms == 255
+            assert result.trace_ref == "blob:trace-batch-1"
             assert len(result.results) == 3
             assert result.results[0].cmd == "open https://example.com"
             assert result.results[0].exit_code == 0
@@ -538,6 +636,9 @@ class TestBayClient:
                 "completed_steps": 2,
                 "success": False,
                 "duration_ms": 130,
+                "execution_id": "exec-browser-batch-2",
+                "execution_time_ms": 136,
+                "trace_ref": None,
             },
             status_code=200,
         )
@@ -554,6 +655,240 @@ class TestBayClient:
             assert result.success is False
             assert result.total_steps == 3
             assert result.completed_steps == 2
+            assert result.execution_id == "exec-browser-batch-2"
             assert len(result.results) == 2
             assert result.results[1].exit_code == 1
             assert result.results[1].stderr == "Element not found: @e99"
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_batch_forwards_learning_fields(
+        self, httpx_mock, mock_sandbox_response
+    ):
+        """Browser exec_batch should forward metadata and learning flags."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/exec_batch",
+            json={
+                "results": [
+                    {
+                        "cmd": "open about:blank",
+                        "stdout": "ok\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 0,
+                        "duration_ms": 15,
+                    }
+                ],
+                "total_steps": 1,
+                "completed_steps": 1,
+                "success": True,
+                "duration_ms": 15,
+                "execution_id": "exec-browser-batch-meta",
+                "execution_time_ms": 17,
+                "trace_ref": "blob:trace-batch-meta",
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.exec_batch(
+                ["open about:blank"],
+                description="batch metadata",
+                tags="browser,batch,meta",
+                learn=True,
+                include_trace=True,
+            )
+            assert result.execution_id == "exec-browser-batch-meta"
+            assert result.trace_ref == "blob:trace-batch-meta"
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["description"] == "batch metadata"
+        assert body["tags"] == "browser,batch,meta"
+        assert body["learn"] is True
+        assert body["include_trace"] is True
+
+    @pytest.mark.asyncio
+    async def test_browser_run_skill(self, httpx_mock, mock_sandbox_response):
+        """Browser run_skill should return replay metadata and steps."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/skills/login-flow/run",
+            json={
+                "skill_key": "login-flow",
+                "release_id": "sr-1",
+                "execution_id": "exec-run-1",
+                "execution_time_ms": 88,
+                "trace_ref": "blob:trace-run-1",
+                "results": [
+                    {
+                        "cmd": "open https://example.com/login",
+                        "stdout": "ok",
+                        "stderr": "",
+                        "exit_code": 0,
+                        "step_index": 0,
+                        "duration_ms": 40,
+                    }
+                ],
+                "total_steps": 1,
+                "completed_steps": 1,
+                "success": True,
+                "duration_ms": 40,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.run_skill(
+                "login-flow",
+                include_trace=True,
+                tags="replay",
+            )
+            assert result.skill_key == "login-flow"
+            assert result.release_id == "sr-1"
+            assert result.execution_id == "exec-run-1"
+            assert result.trace_ref == "blob:trace-run-1"
+            assert result.success is True
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["include_trace"] is True
+        assert body["tags"] == "replay"
+
+    @pytest.mark.asyncio
+    async def test_browser_run_skill_forwards_timeout_and_description(
+        self, httpx_mock, mock_sandbox_response
+    ):
+        """Browser run_skill should send timeout/stop_on_error/description/tags."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/skills/checkout/run",
+            json={
+                "skill_key": "checkout",
+                "release_id": "sr-checkout",
+                "execution_id": "exec-run-checkout",
+                "execution_time_ms": 45,
+                "trace_ref": None,
+                "results": [],
+                "total_steps": 0,
+                "completed_steps": 0,
+                "success": True,
+                "duration_ms": 0,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.run_skill(
+                "checkout",
+                timeout=150,
+                stop_on_error=False,
+                include_trace=False,
+                description="checkout replay",
+                tags="skill:checkout,replay",
+            )
+            assert result.execution_id == "exec-run-checkout"
+            assert result.trace_ref is None
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["timeout"] == 150
+        assert body["stop_on_error"] is False
+        assert body["include_trace"] is False
+        assert body["description"] == "checkout replay"
+        assert body["tags"] == "skill:checkout,replay"
+
+    @pytest.mark.asyncio
+    async def test_browser_run_skill_sends_default_flags(self, httpx_mock, mock_sandbox_response):
+        """Browser run_skill should send default timeout/stop_on_error/include_trace."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes/sbx_123/browser/skills/login/run",
+            json={
+                "skill_key": "login",
+                "release_id": "sr-login",
+                "execution_id": "exec-run-login",
+                "execution_time_ms": 35,
+                "trace_ref": None,
+                "results": [],
+                "total_steps": 0,
+                "completed_steps": 0,
+                "success": True,
+                "duration_ms": 0,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            result = await sandbox.browser.run_skill("login")
+            assert result.execution_id == "exec-run-login"
+
+        request = httpx_mock.get_requests()[-1]
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["timeout"] == 60
+        assert body["stop_on_error"] is True
+        assert body["include_trace"] is False
+
+    @pytest.mark.asyncio
+    async def test_browser_exec_batch_rejects_empty_commands_before_http(
+        self, httpx_mock, mock_sandbox_response
+    ):
+        """Browser exec_batch should fail fast on empty command list."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            with pytest.raises(ValidationError):
+                await sandbox.browser.exec_batch([])
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert str(requests[0].url) == "http://localhost:8000/v1/sandboxes"

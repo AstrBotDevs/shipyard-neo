@@ -6,10 +6,10 @@ from collections import OrderedDict
 from types import SimpleNamespace
 
 import pytest
+from shipyard_neo_mcp import server as mcp_server
 
 from shipyard_neo import BayError
 from shipyard_neo.types import SkillCandidateStatus, SkillReleaseStage
-from shipyard_neo_mcp import server as mcp_server
 
 
 class FakePythonCapability:
@@ -75,13 +75,29 @@ class FakeBrowserCapability:
         cmd: str,
         *,
         timeout: int = 30,
+        description: str | None = None,
+        tags: str | None = None,
+        learn: bool = False,
+        include_trace: bool = False,
     ):
-        self.calls.append({"cmd": cmd, "timeout": timeout})
+        self.calls.append(
+            {
+                "cmd": cmd,
+                "timeout": timeout,
+                "description": description,
+                "tags": tags,
+                "learn": learn,
+                "include_trace": include_trace,
+            }
+        )
         return SimpleNamespace(
             success=True,
             output="snapshot output\n",
             error=None,
             exit_code=0,
+            execution_id="exec-browser-1",
+            execution_time_ms=11,
+            trace_ref="blob:trace-browser-1" if include_trace else None,
         )
 
     async def exec_batch(
@@ -90,9 +106,21 @@ class FakeBrowserCapability:
         *,
         timeout: int = 60,
         stop_on_error: bool = True,
+        description: str | None = None,
+        tags: str | None = None,
+        learn: bool = False,
+        include_trace: bool = False,
     ):
         self.calls.append(
-            {"commands": commands, "timeout": timeout, "stop_on_error": stop_on_error}
+            {
+                "commands": commands,
+                "timeout": timeout,
+                "stop_on_error": stop_on_error,
+                "description": description,
+                "tags": tags,
+                "learn": learn,
+                "include_trace": include_trace,
+            }
         )
         results = [
             SimpleNamespace(
@@ -111,6 +139,9 @@ class FakeBrowserCapability:
             completed_steps=len(commands),
             success=True,
             duration_ms=sum(r.duration_ms for r in results),
+            execution_id="exec-browser-batch-1",
+            execution_time_ms=31,
+            trace_ref="blob:trace-browser-batch-1" if include_trace else None,
         )
 
 
@@ -562,13 +593,25 @@ async def test_execute_browser_formats_success():
     assert "Browser command successful" in text
     assert "exit code: 0" in text
     assert "snapshot output" in text
+    assert "execution_id: exec-browser-1" in text
+    assert "execution_time_ms: 11" in text
     assert fake_sandbox.browser.calls[0]["cmd"] == "open https://example.com"
 
 
 @pytest.mark.asyncio
 async def test_execute_browser_formats_failure():
     class FailBrowserCapability(FakeBrowserCapability):
-        async def exec(self, cmd: str, *, timeout: int = 30):
+        async def exec(
+            self,
+            cmd: str,
+            *,
+            timeout: int = 30,
+            description: str | None = None,
+            tags: str | None = None,
+            learn: bool = False,
+            include_trace: bool = False,
+        ):
+            _ = (description, tags, learn, include_trace)
             return SimpleNamespace(
                 success=False,
                 output="",
@@ -624,6 +667,48 @@ async def test_execute_browser_custom_timeout():
     assert fake_sandbox.browser.calls[0]["timeout"] == 120
 
 
+@pytest.mark.asyncio
+async def test_execute_browser_passes_learning_flags():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {
+            "sandbox_id": "sbx-1",
+            "cmd": "snapshot -i",
+            "description": "capture controls",
+            "tags": "browser,trace",
+            "learn": True,
+            "include_trace": True,
+        },
+    )
+
+    call = fake_sandbox.browser.calls[0]
+    assert call["description"] == "capture controls"
+    assert call["tags"] == "browser,trace"
+    assert call["learn"] is True
+    assert call["include_trace"] is True
+    assert "trace_ref: blob:trace-browser-1" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_without_trace_does_not_render_trace_ref():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "snapshot -i", "include_trace": False},
+    )
+
+    text = response[0].text
+    assert "execution_id: exec-browser-1" in text
+    assert "trace_ref:" not in text
+
+
 # -- Browser batch tests --
 
 
@@ -643,6 +728,8 @@ async def test_execute_browser_batch_formats_success():
     text = response[0].text
     assert "Batch execution completed" in text
     assert "3/3 steps" in text
+    assert "execution_id: exec-browser-batch-1" in text
+    assert "execution_time_ms: 31" in text
     assert "✅ Step 0" in text
     assert "✅ Step 1" in text
     assert "✅ Step 2" in text
@@ -653,7 +740,18 @@ async def test_execute_browser_batch_formats_success():
 @pytest.mark.asyncio
 async def test_execute_browser_batch_with_failure():
     class PartialFailBrowserCapability(FakeBrowserCapability):
-        async def exec_batch(self, commands, *, timeout=60, stop_on_error=True):
+        async def exec_batch(
+            self,
+            commands,
+            *,
+            timeout=60,
+            stop_on_error=True,
+            description: str | None = None,
+            tags: str | None = None,
+            learn: bool = False,
+            include_trace: bool = False,
+        ):
+            _ = (description, tags, learn, include_trace)
             return SimpleNamespace(
                 results=[
                     SimpleNamespace(
@@ -725,6 +823,91 @@ async def test_execute_browser_batch_passes_stop_on_error():
 
 
 @pytest.mark.asyncio
+async def test_execute_browser_batch_passes_learning_flags():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {
+            "sandbox_id": "sbx-1",
+            "commands": ["open https://example.com", "snapshot -i"],
+            "description": "batch run",
+            "tags": "browser,batch",
+            "learn": True,
+            "include_trace": True,
+        },
+    )
+
+    call = fake_sandbox.browser.calls[0]
+    assert call["description"] == "batch run"
+    assert call["tags"] == "browser,batch"
+    assert call["learn"] is True
+    assert call["include_trace"] is True
+    assert "trace_ref: blob:trace-browser-batch-1" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_without_trace_does_not_render_trace_ref():
+    fake_sandbox = FakeSandbox()
+    mcp_server._sandboxes["sbx-1"] = fake_sandbox
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {
+            "sandbox_id": "sbx-1",
+            "commands": ["open https://example.com", "snapshot -i"],
+            "include_trace": False,
+        },
+    )
+
+    text = response[0].text
+    assert "execution_id: exec-browser-batch-1" in text
+    assert "trace_ref:" not in text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_handles_missing_optional_metadata_fields():
+    class MinimalBrowserCapability(FakeBrowserCapability):
+        async def exec(
+            self,
+            cmd: str,
+            *,
+            timeout: int = 30,
+            description: str | None = None,
+            tags: str | None = None,
+            learn: bool = False,
+            include_trace: bool = False,
+        ):
+            _ = (cmd, timeout, description, tags, learn, include_trace)
+            return SimpleNamespace(
+                success=True,
+                output="ok\n",
+                error=None,
+                exit_code=0,
+            )
+
+    class MinimalBrowserSandbox(FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.browser = MinimalBrowserCapability()
+
+    mcp_server._sandboxes["sbx-1"] = MinimalBrowserSandbox()
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "open about:blank"},
+    )
+    text = response[0].text
+    assert "Browser command successful" in text
+    assert "execution_id:" not in text
+    assert "execution_time_ms:" not in text
+
+
+@pytest.mark.asyncio
 async def test_execute_browser_batch_empty_commands_is_validation_error():
     mcp_server._client = FakeClient()
 
@@ -733,6 +916,28 @@ async def test_execute_browser_batch_empty_commands_is_validation_error():
         {"sandbox_id": "sbx-1", "commands": []},
     )
     assert "non-empty array" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_batch_rejects_non_string_command_items():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser_batch",
+        {"sandbox_id": "sbx-1", "commands": ["open https://example.com", 123]},
+    )
+    assert "non-empty array of strings" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_rejects_non_boolean_include_trace():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "execute_browser",
+        {"sandbox_id": "sbx-1", "cmd": "snapshot -i", "include_trace": "yes"},
+    )
+    assert "field 'include_trace' must be a boolean" in response[0].text
 
 
 # -- list_profiles tests --

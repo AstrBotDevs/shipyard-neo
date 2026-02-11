@@ -132,6 +132,59 @@ Gull 内部使用 `shlex.split()` 拆分 `cmd`（见 [`_run_agent_browser()`](pk
 }
 ```
 
+### 1.1 在 Bay 中启用学习与回放
+
+如果通过 Bay 的浏览器 capability 使用（`/v1/sandboxes/{sandbox_id}/browser/*`），可直接开启自迭代证据：
+
+- `learn=true`：该次执行进入 browser learning 管线
+- `include_trace=true`：返回 `trace_ref` 并持久化 step 轨迹
+
+示例（单条）：
+
+```json
+{
+  "cmd": "open https://example.com",
+  "learn": true,
+  "include_trace": true
+}
+```
+
+示例（批量）：
+
+```json
+{
+  "commands": ["open https://example.com", "click @e1", "fill @e2 \"hello\""],
+  "learn": true,
+  "include_trace": true
+}
+```
+
+回放接口：
+
+- `POST /v1/sandboxes/{sandbox_id}/browser/skills/{skill_key}/run`
+- 返回 `execution_id`、`trace_ref`、step 结果
+
+### 1.2 自迭代接口验收清单
+
+建议每次改动 browser skill 相关代码后，按以下最小链路验收：
+
+1. 单条执行（`learn=true, include_trace=true`）：
+   - 响应有 `execution_id`、`trace_ref`
+2. 批量执行（`learn=true, include_trace=false`）：
+   - 响应有 `execution_id`，history 中仍有 `payload_ref`
+3. 轨迹回查：
+   - `GET /v1/sandboxes/{sandbox_id}/browser/traces/{trace_ref}` 可返回完整 step 数据
+4. 回放接口：
+   - 有 active release 时返回 step 结果
+   - 无 active release 时返回 404（错误信息明确）
+
+可直接运行：
+
+```bash
+cd pkgs/bay
+uv run pytest -q tests/integration/core/test_browser_skill_e2e.py
+```
+
 ---
 
 ## 4. 命令参考（以 Gull cmd 形式展示）

@@ -8,7 +8,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
 from app.errors import ConflictError, NotFoundError, ValidationError
-from app.models.skill import ExecutionType, SkillCandidateStatus, SkillReleaseStage
+from app.models.skill import (
+    ExecutionType,
+    LearnStatus,
+    SkillCandidateStatus,
+    SkillReleaseMode,
+    SkillReleaseStage,
+    SkillType,
+)
 from app.services.skills import SkillLifecycleService
 
 
@@ -239,6 +246,62 @@ class TestExecutionHistory:
             tags=" , ",
         )
         assert updated.tags is None
+
+    async def test_list_pending_browser_learning_filters_by_type_status_and_flag(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        pending_browser = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER,
+            code="open https://example.com",
+            success=True,
+            execution_time_ms=5,
+            learn_enabled=True,
+            learn_status=LearnStatus.PENDING,
+        )
+        await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="open https://example.com\nsnapshot -i",
+            success=True,
+            execution_time_ms=7,
+            learn_enabled=True,
+            learn_status=LearnStatus.PROCESSING,
+        )
+        await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.PYTHON,
+            code="print('x')",
+            success=True,
+            execution_time_ms=3,
+            learn_enabled=True,
+            learn_status=LearnStatus.PENDING,
+        )
+        await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER,
+            code="snapshot -i",
+            success=True,
+            execution_time_ms=4,
+            learn_enabled=False,
+        )
+
+        pending = await skill_service.list_pending_browser_learning_executions(limit=20)
+        assert [item.id for item in pending] == [pending_browser.id]
+
+    async def test_list_pending_browser_learning_validates_limit(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        with pytest.raises(ValidationError, match="limit must be between 1 and 500"):
+            await skill_service.list_pending_browser_learning_executions(limit=0)
+        with pytest.raises(ValidationError, match="limit must be between 1 and 500"):
+            await skill_service.list_pending_browser_learning_executions(limit=501)
 
 
 class TestCandidateLifecycle:
@@ -648,3 +711,438 @@ class TestCandidateLifecycle:
         assert rollback_release.is_active is True
         assert rollback_release.version == release_b.version + 1
         assert candidate_b_after.status == SkillCandidateStatus.ROLLED_BACK
+
+
+class TestBrowserSkillExtensions:
+    async def test_execution_learning_and_blob_payload_round_trip(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        blob = await skill_service.create_artifact_blob(
+            owner="default",
+            kind="browser_trace",
+            payload={
+                "kind": "browser_batch_trace",
+                "steps": [
+                    {"kind": "individual_action", "cmd": "open https://example.com", "exit_code": 0}
+                ],
+            },
+        )
+        payload_ref = skill_service.make_blob_ref(blob.id)
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER,
+            code="open https://example.com",
+            success=True,
+            execution_time_ms=10,
+            payload_ref=payload_ref,
+            learn_enabled=True,
+            learn_status=LearnStatus.PENDING,
+        )
+        assert entry.payload_ref == payload_ref
+        assert entry.learn_enabled is True
+        assert entry.learn_status == LearnStatus.PENDING
+
+        payload = await skill_service.get_payload_by_ref(owner="default", payload_ref=payload_ref)
+        assert isinstance(payload, dict)
+        assert payload["steps"][0]["cmd"] == "open https://example.com"
+
+    async def test_payload_ref_validation_and_json_decode_error(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        with pytest.raises(ValidationError, match="Unsupported payload_ref"):
+            await skill_service.get_payload_by_ref(owner="default", payload_ref="s3://blob-1")
+
+        with pytest.raises(ValidationError, match="Invalid payload_ref"):
+            await skill_service.get_payload_by_ref(owner="default", payload_ref="blob:")
+
+        blob = await skill_service.create_artifact_blob(
+            owner="default",
+            kind="browser_trace",
+            payload={"steps": []},
+        )
+        blob.payload_json = "{bad-json"
+        await skill_service._db.commit()  # test-only state injection
+
+        with pytest.raises(ValidationError, match="Invalid payload JSON in blob"):
+            await skill_service.get_payload_by_ref(
+                owner="default",
+                payload_ref=skill_service.make_blob_ref(blob.id),
+            )
+
+    async def test_merge_tags_deduplicates_and_sorts(self):
+        merged = SkillLifecycleService.merge_tags(
+            " skill:checkout , release:sr-2 ",
+            "release:sr-2,stage:canary",
+            None,
+            "skill:checkout",
+        )
+        assert merged == "release:sr-2,skill:checkout,stage:canary"
+
+        assert SkillLifecycleService.merge_tags(None, "  ,  ") is None
+
+    async def test_browser_candidate_auto_release_fields(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="open https://example.com\nclick @e1",
+            success=True,
+            execution_time_ms=21,
+        )
+        candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-login",
+            source_execution_ids=[entry.id],
+            skill_type=SkillType.BROWSER,
+            auto_release_eligible=False,
+            auto_release_reason="pending",
+            created_by="system:auto",
+        )
+        assert candidate.skill_type == SkillType.BROWSER
+        assert candidate.auto_release_eligible is False
+        assert candidate.auto_release_reason == "pending"
+
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            passed=True,
+            score=0.96,
+            report='{"replay_success":0.98,"samples":40}',
+        )
+        release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            stage=SkillReleaseStage.CANARY,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+        refreshed = await skill_service.get_candidate(owner="default", candidate_id=candidate.id)
+        assert release.release_mode == SkillReleaseMode.AUTO
+        assert refreshed.status == SkillCandidateStatus.PROMOTED_CANARY
+
+    async def test_auto_stable_promotion_sets_browser_candidate_status(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="open https://example.com\nclick @e1",
+            success=True,
+            execution_time_ms=14,
+        )
+        candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-stable",
+            source_execution_ids=[entry.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            passed=True,
+            score=0.99,
+            report='{"replay_success":0.99,"samples":80}',
+        )
+        release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            stage=SkillReleaseStage.STABLE,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+        refreshed = await skill_service.get_candidate(owner="default", candidate_id=candidate.id)
+        assert release.stage == SkillReleaseStage.STABLE
+        assert release.release_mode == SkillReleaseMode.AUTO
+        assert refreshed.status == SkillCandidateStatus.PROMOTED_STABLE
+
+    async def test_release_health_detects_success_drop_for_rollback(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        base_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="open https://example.com\nclick @e1\nfill @e2 foo",
+            success=True,
+            execution_time_ms=10,
+        )
+        base_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-search",
+            source_execution_ids=[base_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=base_candidate.id,
+            passed=True,
+            score=0.98,
+            report='{"replay_success":0.99,"samples":100}',
+        )
+        base_release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=base_candidate.id,
+            stage=SkillReleaseStage.STABLE,
+            promoted_by="default",
+        )
+        # baseline executions (all successful)
+        for _ in range(5):
+            await skill_service.create_execution(
+                owner="default",
+                sandbox_id="sandbox-1",
+                exec_type=ExecutionType.BROWSER_BATCH,
+                code="replay stable",
+                success=True,
+                execution_time_ms=8,
+                tags=f"release:{base_release.id},skill:browser-search",
+            )
+
+        canary_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="open https://example.com\nclick @e1\nfill @e2 foo",
+            success=True,
+            execution_time_ms=9,
+        )
+        canary_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-search",
+            source_execution_ids=[canary_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            passed=True,
+            score=0.91,
+            report='{"replay_success":0.96,"samples":60}',
+        )
+        canary_release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            stage=SkillReleaseStage.CANARY,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+
+        # degraded canary signal: 2/5 failures -> success rate 60%
+        outcomes = [True, False, False, True, True]
+        for outcome in outcomes:
+            await skill_service.create_execution(
+                owner="default",
+                sandbox_id="sandbox-1",
+                exec_type=ExecutionType.BROWSER_BATCH,
+                code="replay canary",
+                success=outcome,
+                execution_time_ms=11,
+                tags=f"release:{canary_release.id},skill:browser-search",
+            )
+
+        health = await skill_service.get_release_health(
+            owner="default",
+            release_id=canary_release.id,
+        )
+        assert health["should_rollback"] is True
+        assert "success_rate_drop" in health["rollback_reasons"]
+
+    async def test_release_health_uses_previous_evaluation_as_baseline_fallback(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        prev_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="baseline source",
+            success=True,
+            execution_time_ms=12,
+        )
+        prev_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-baseline-fallback",
+            source_execution_ids=[prev_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=prev_candidate.id,
+            passed=True,
+            score=0.9,
+            report='{"replay_success":0.91,"error_rate":0.09,"samples":55,"p95_duration":2000}',
+        )
+        await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=prev_candidate.id,
+            stage=SkillReleaseStage.STABLE,
+        )
+
+        canary_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="canary source",
+            success=True,
+            execution_time_ms=10,
+        )
+        canary_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-baseline-fallback",
+            source_execution_ids=[canary_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            passed=True,
+            score=0.95,
+            report='{"replay_success":0.97,"samples":60}',
+        )
+        canary_release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            stage=SkillReleaseStage.CANARY,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+        await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="canary replay",
+            success=True,
+            execution_time_ms=11,
+            tags=f"release:{canary_release.id},skill:browser-baseline-fallback",
+        )
+
+        health = await skill_service.get_release_health(
+            owner="default",
+            release_id=canary_release.id,
+        )
+        assert health["baseline_samples"] == 55
+        assert health["baseline_success_rate"] == pytest.approx(0.91)
+        assert health["baseline_error_rate"] == pytest.approx(0.09)
+        assert health["should_rollback"] is False
+
+    async def test_release_health_without_observations_does_not_trigger_rollback(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="source",
+            success=True,
+            execution_time_ms=8,
+        )
+        candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-no-observed-samples",
+            source_execution_ids=[entry.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            passed=True,
+            score=0.92,
+        )
+        release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            stage=SkillReleaseStage.CANARY,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+
+        health = await skill_service.get_release_health(owner="default", release_id=release.id)
+        assert health["samples"] == 0
+        assert health["healthy"] is False
+        assert health["should_rollback"] is False
+
+    async def test_release_health_rolls_back_when_baseline_error_rate_is_zero_and_canary_fails(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        stable_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="stable source",
+            success=True,
+            execution_time_ms=9,
+        )
+        stable_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-zero-error-baseline",
+            source_execution_ids=[stable_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=stable_candidate.id,
+            passed=True,
+            score=0.97,
+            report='{"replay_success":1.0,"error_rate":0.0,"samples":100}',
+        )
+        await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=stable_candidate.id,
+            stage=SkillReleaseStage.STABLE,
+        )
+
+        canary_exec = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="canary source",
+            success=True,
+            execution_time_ms=10,
+        )
+        canary_candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-zero-error-baseline",
+            source_execution_ids=[canary_exec.id],
+            skill_type=SkillType.BROWSER,
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            passed=True,
+            score=0.9,
+        )
+        canary_release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=canary_candidate.id,
+            stage=SkillReleaseStage.CANARY,
+            promoted_by="system:auto",
+            release_mode=SkillReleaseMode.AUTO,
+        )
+        await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.BROWSER_BATCH,
+            code="canary replay",
+            success=False,
+            execution_time_ms=11,
+            tags=f"release:{canary_release.id},skill:browser-zero-error-baseline",
+        )
+
+        health = await skill_service.get_release_health(
+            owner="default",
+            release_id=canary_release.id,
+        )
+        assert health["baseline_error_rate"] == 0.0
+        assert health["error_rate_multiplier"] > 1000
+        assert health["should_rollback"] is True
+        assert "error_rate_regression" in health["rollback_reasons"]
