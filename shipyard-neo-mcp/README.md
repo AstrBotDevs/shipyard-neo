@@ -29,6 +29,38 @@ Shipyard Neo 的 MCP (Model Context Protocol) 接入层。
 | `list_skill_candidates` | 查询候选列表 |
 | `list_skill_releases` | 查询发布列表 |
 | `rollback_skill_release` | 回滚发布版本 |
+| `execute_browser` | 执行浏览器自动化命令（支持 `learn/include_trace`） |
+| `execute_browser_batch` | 批量执行浏览器命令序列 |
+| `list_profiles` | 列出可用的 sandbox profile |
+
+## 项目结构
+
+```
+src/shipyard_neo_mcp/
+├── __init__.py          # 包入口，导出 main()
+├── __main__.py          # python -m shipyard_neo_mcp 入口
+├── server.py            # MCP Server 组装：lifespan、call_tool dispatch、向后兼容层
+├── config.py            # 环境变量读取、运行时常量（MAX_TOOL_TEXT_CHARS 等）
+├── validators.py        # 参数校验工具函数（validate_sandbox_id、read_int、require_str 等）
+├── sandbox_cache.py     # Sandbox 实例 LRU 缓存 + BayClient 全局状态管理
+├── tool_defs.py         # MCP Tool JSON Schema 定义（get_tool_definitions()）
+└── handlers/            # Tool handler 按功能域拆分
+    ├── __init__.py      # TOOL_HANDLERS 注册表（tool name → handler 映射）
+    ├── sandbox.py       # create_sandbox / delete_sandbox
+    ├── execution.py     # execute_python / execute_shell
+    ├── filesystem.py    # read_file / write_file / list_files / delete_file / upload_file / download_file
+    ├── history.py       # get_execution_history / get_execution / get_last_execution / annotate_execution
+    ├── skills.py        # create/evaluate/promote/list skill candidates & releases、payloads
+    ├── browser.py       # execute_browser / execute_browser_batch
+    └── profiles.py      # list_profiles
+```
+
+**架构概览：**
+
+- `server.py` 是薄入口层，负责创建 MCP `Server` 实例、管理 `BayClient` 生命周期、将 tool 调用分发到对应 handler。
+- `handlers/` 下按功能域拆分，每个 handler 函数签名统一为 `async def handle_xxx(arguments: dict) -> list[TextContent]`。
+- 新增 tool 时只需：① 在 `tool_defs.py` 添加 schema ② 在 `handlers/` 对应模块添加 handler ③ 在 `handlers/__init__.py` 的 `TOOL_HANDLERS` 中注册映射。
+- 所有配置常量通过 `config` 模块引用（`_config.MAX_TOOL_TEXT_CHARS`），支持测试中 `monkeypatch` 动态修改。
 
 ## 安装
 
