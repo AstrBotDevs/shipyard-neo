@@ -7,6 +7,7 @@
 Shipyard Neo 提供的是 **self-update 基建**，而不是固定训练框架：
 
 - **运行时执行证据层**：自动记录 Python/Shell 执行历史
+- **浏览器证据层**：browser exec/exec_batch 记录 `execution_id`、`trace_ref`、`learn` 状态
 - **技能控制面**：Candidate -> Evaluation -> Release -> Rollback
 - **多入口**：REST API / Python SDK / MCP tools
 
@@ -21,6 +22,16 @@ Shipyard Neo 提供的是 **self-update 基建**，而不是固定训练框架�
 5. 评测系统写入 evaluate 结果（score/pass/report）
 6. 满足条件后 promote，生成版本化 release（canary/stable）
 7. 线上异常时可 rollback 到上一版本
+
+### 2.1 Browser 自迭代闭环（自动发布）
+
+1. Agent 调用 `POST /v1/sandboxes/{sandbox_id}/browser/exec` 或 `exec_batch`，传入 `learn=true`。
+2. 可选传入 `include_trace=true`，Bay 返回 `trace_ref` 并把 step 轨迹外置到 `payload_ref=blob:<id>`。
+3. Bay 后台异步任务扫描 `learn=true` 的 browser 证据，抽取连续可执行动作段（长度>=2，排除失败/只读动作）。
+4. 自动创建 browser candidate 并写入回放评测结果。
+5. 达到阈值时自动发 canary：`score>=0.85`、`replay_success>=95%`、`samples>=30`。
+6. canary 健康窗口 24 小时达标后自动升 stable。
+7. 若 `success_rate` 下降超过 3% 或 `error_rate` 升至 2x 以上，自动回滚并写审计日志。
 
 ## 3. REST API 关键接口
 
@@ -40,6 +51,14 @@ Shipyard Neo 提供的是 **self-update 基建**，而不是固定训练框架�
 - `POST /v1/skills/candidates/{candidate_id}/promote`
 - `GET /v1/skills/releases`
 - `POST /v1/skills/releases/{release_id}/rollback`
+- `GET /v1/skills/releases/{release_id}/health`
+
+### 3.3 Browser Skill APIs
+
+- `POST /v1/sandboxes/{sandbox_id}/browser/exec`
+- `POST /v1/sandboxes/{sandbox_id}/browser/exec_batch`
+- `POST /v1/sandboxes/{sandbox_id}/browser/skills/{skill_key}/run`
+- `GET /v1/sandboxes/{sandbox_id}/browser/traces/{trace_ref}`
 
 ## 4. Python SDK 示例
 
@@ -96,6 +115,7 @@ async with BayClient(endpoint_url="http://localhost:8000", access_token="token")
 3. **发布分级**：先 canary，再 stable。
 4. **回滚自动化**：将关键线上指标绑定 rollback 触发器。
 5. **证据可追溯**：candidate 必须保留 source execution IDs。
+6. **渐进上线**：生产首轮建议设置 `BAY_BROWSER_AUTO_RELEASE_ENABLED=false`，验证指标稳定后再打开。
 
 ## 7. 运行期稳态保障（已内置）
 
@@ -104,3 +124,41 @@ async with BayClient(endpoint_url="http://localhost:8000", access_token="token")
 3. **MCP 参数校验**：缺少必填参数会返回可读的 `Validation Error`，而不是裸 `KeyError`。
 4. **MCP 输出截断**：超长工具输出自动截断并标记，避免上下文爆炸。
 5. **缓存有界化**：sandbox 缓存有上限并按 LRU 淘汰，避免长时运行内存线性增长。
+
+## 8. 测试矩阵与回归命令
+
+建议按“单测先行，E2E 兜底”执行：
+
+1. Bay 单测（browser learning/service 分支覆盖）
+```bash
+cd pkgs/bay
+uv run pytest -q \
+  tests/unit/managers/test_browser_learning_lifecycle.py \
+  tests/unit/managers/test_skill_lifecycle_service.py \
+  tests/unit/managers/test_browser_learning_scheduler.py \
+  tests/unit/api/test_capabilities_browser_payloads.py
+```
+
+2. SDK 单测（browser 参数透传与 health 解析）
+```bash
+cd shipyard-neo-sdk
+uv run pytest -q tests/test_client.py tests/test_skills_and_history.py
+```
+
+3. MCP 单测（tool schema + handler 输出）
+```bash
+cd shipyard-neo-sdk
+PYTHONPATH=../shipyard-neo-mcp/src uv run --with mcp pytest -q ../shipyard-neo-mcp/tests/test_server.py
+```
+
+4. Bay E2E（需 Bay/Ship/Gull 环境）
+```bash
+cd pkgs/bay
+uv run pytest -q \
+  tests/integration/core/test_history_api.py \
+  tests/integration/core/test_skill_lifecycle_api.py \
+  tests/integration/core/test_browser_skill_e2e.py
+```
+
+`test_browser_skill_e2e.py` 会自动检查 browser profile 与 Docker 下 `gull:latest`，环境不满足时会 `skip`，不会污染单测结论。
+其中包含 `run_skill` 的负例分支（无 active release、非法 payload_ref）回归。

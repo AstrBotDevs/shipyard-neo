@@ -81,9 +81,22 @@ Shipyard Neo 提供的是 self-update 的“基础设施”，而不是固定训
 
 - **执行证据层**：Python/Shell/Browser 执行自动生成并持久化 `execution_id`。
 - **技能控制面**：Candidate → Evaluation → Release（canary/stable）→ Rollback。
+- **Browser 自动发布策略**：`score>=0.85`、`replay_success>=95%`、`samples>=30` 自动发 canary，健康 24h 自动升 stable。
+- **自动回滚策略**：`success_rate` 下降 >3% 或 `error_rate` 上升 >2x 自动回滚。
+- **熔断开关**：`BAY_BROWSER_AUTO_RELEASE_ENABLED` 可一键关闭 browser 自动发布（建议灰度期先设为 `false`）。
 - **多入口**：REST API / Python SDK / MCP Tools。
 
 工程化落地指南：[`doc/skills_self_update_guide_zh.md`](doc/skills_self_update_guide_zh.md)
+
+最小回归命令（新增 browser self-iteration 功能后建议必跑）：
+
+```bash
+cd pkgs/bay
+uv run pytest -q \
+  tests/unit/managers/test_skill_lifecycle_service.py \
+  tests/unit/managers/test_browser_learning_scheduler.py \
+  tests/unit/api/test_capabilities_browser_payloads.py
+```
 
 ---
 

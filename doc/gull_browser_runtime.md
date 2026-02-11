@@ -31,6 +31,7 @@ Gull 是 Shipyard Neo 的**浏览器运行时组件**，作为 [`agent-browser`]
 | **状态持久化** | 自动注入 `--profile` 参数，将 cookies/localStorage 等持久化到 Cargo Volume |
 | **批量执行** | 支持 `/exec_batch` 端点，一次请求执行多条命令 |
 | **超时控制** | 每条命令支持独立超时，批量执行支持整体超时预算 |
+| **学习证据** | Bay 层可选记录 `execution_id/trace_ref`，支持 browser skill 自动学习与回放 |
 
 ### 技术栈
 
@@ -492,7 +493,14 @@ Bay 的 CapabilityRouter 根据请求的 capability 类型将请求路由到对�
 curl -X POST http://bay-server/v1/sandboxes/{sandbox_id}/browser/exec \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
-  -d '{"cmd": "open https://example.com", "timeout": 30}'
+  -d '{
+    "cmd": "open https://example.com",
+    "timeout": 30,
+    "description": "search homepage",
+    "tags": "browser,search",
+    "learn": true,
+    "include_trace": true
+  }'
 ```
 
 ```json
@@ -500,7 +508,10 @@ curl -X POST http://bay-server/v1/sandboxes/{sandbox_id}/browser/exec \
   "success": true,
   "output": "Navigated to https://example.com",
   "error": null,
-  "exit_code": 0
+  "exit_code": 0,
+  "execution_id": "exec-xxx",
+  "execution_time_ms": 1240,
+  "trace_ref": "blob:blob-xxx"
 }
 ```
 
@@ -518,8 +529,26 @@ curl -X POST http://bay-server/v1/sandboxes/{sandbox_id}/browser/exec_batch \
       "screenshot /workspace/page.png"
     ],
     "timeout": 60,
-    "stop_on_error": true
+    "stop_on_error": true,
+    "learn": true,
+    "include_trace": true
   }'
+```
+
+**Browser skill 回放**:
+
+```bash
+curl -X POST http://bay-server/v1/sandboxes/{sandbox_id}/browser/skills/{skill_key}/run \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"timeout": 60, "include_trace": true}'
+```
+
+**Trace 查询**:
+
+```bash
+curl -X GET http://bay-server/v1/sandboxes/{sandbox_id}/browser/traces/{trace_ref} \
+  -H 'Authorization: Bearer <token>'
 ```
 
 ### 4.4 Profile 配置
@@ -675,6 +704,24 @@ CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "808
 ```
 
 原因：uvloop 的管道管理与 Node.js 子进程（agent-browser）不兼容，会导致 `process.communicate()` 挂起等待 EOF，表现为命令超时。
+
+### 5.5 Bay Browser Self-Iteration 回归建议
+
+Gull 改动后，建议在 Bay 侧补跑 browser 自迭代回归，确保 `learn/include_trace` 与证据链路不回退：
+
+```bash
+cd pkgs/bay
+uv run pytest -q \
+  tests/integration/core/test_history_api.py \
+  tests/integration/core/test_browser_skill_e2e.py
+```
+
+重点核对：
+
+- `POST /v1/sandboxes/{sandbox_id}/browser/exec` 与 `exec_batch` 都返回 `execution_id`。
+- `learn=true` 时 history 中存在 `learn_enabled/payload_ref`。
+- `include_trace=true` 时响应返回 `trace_ref`，且可通过 `GET /browser/traces/{trace_ref}` 取回轨迹。
+- `POST /browser/skills/{skill_key}/run` 在无 active release 时返回明确 404。
 
 ---
 
