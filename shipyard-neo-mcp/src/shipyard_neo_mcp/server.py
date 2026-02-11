@@ -737,6 +737,22 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Execution timeout in seconds. Defaults to 30.",
                     },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional execution description for learning evidence.",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags for execution evidence.",
+                    },
+                    "learn": {
+                        "type": "boolean",
+                        "description": "Whether this execution should enter browser learning pipeline.",
+                    },
+                    "include_trace": {
+                        "type": "boolean",
+                        "description": "Persist and return trace_ref for step-level replay trace.",
+                    },
                 },
                 "required": ["sandbox_id", "cmd"],
             },
@@ -772,6 +788,22 @@ async def list_tools() -> list[Tool]:
                     "stop_on_error": {
                         "type": "boolean",
                         "description": "Stop execution if a command fails. Defaults to true.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional execution description for learning evidence.",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags for execution evidence.",
+                    },
+                    "learn": {
+                        "type": "boolean",
+                        "description": "Whether this execution should enter browser learning pipeline.",
+                    },
+                    "include_trace": {
+                        "type": "boolean",
+                        "description": "Persist and return trace_ref for step-level replay trace.",
                     },
                 },
                 "required": ["sandbox_id", "commands"],
@@ -1327,14 +1359,35 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             sandbox_id = _validate_sandbox_id(arguments)
             cmd = _require_str(arguments, "cmd")
             timeout = _read_int(arguments, "timeout", 30, min_value=1, max_value=300)
+            description = _optional_str(arguments, "description")
+            tags = _optional_str(arguments, "tags")
+            learn = _read_bool(arguments, "learn", False)
+            include_trace = _read_bool(arguments, "include_trace", False)
 
             sandbox = await get_sandbox(sandbox_id)
             async with asyncio.timeout(_SDK_CALL_TIMEOUT):
-                result = await sandbox.browser.exec(cmd, timeout=timeout)
+                result = await sandbox.browser.exec(
+                    cmd,
+                    timeout=timeout,
+                    description=description,
+                    tags=tags,
+                    learn=learn,
+                    include_trace=include_trace,
+                )
 
             output = _truncate_text(result.output or "(no output)")
             status = "successful" if result.success else "failed"
             exit_code = result.exit_code if result.exit_code is not None else "N/A"
+            suffix = ""
+            execution_id = getattr(result, "execution_id", None)
+            execution_time_ms = getattr(result, "execution_time_ms", None)
+            trace_ref = getattr(result, "trace_ref", None)
+            if execution_id:
+                suffix += f"\n\nexecution_id: {execution_id}"
+            if execution_time_ms is not None:
+                suffix += f"\nexecution_time_ms: {execution_time_ms}"
+            if trace_ref:
+                suffix += f"\ntrace_ref: {trace_ref}"
             error_suffix = ""
             if not result.success and result.error:
                 error_suffix = f"\n\nstderr:\n{_truncate_text(result.error)}"
@@ -1344,7 +1397,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     type="text",
                     text=(
                         f"**Browser command {status}** (exit code: {exit_code})\n\n"
-                        f"```\n{output}\n```{error_suffix}"
+                        f"```\n{output}\n```{suffix}{error_suffix}"
                     ),
                 )
             ]
@@ -1354,6 +1407,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             commands = _require_str_list(arguments, "commands")
             timeout = _read_int(arguments, "timeout", 60, min_value=1, max_value=600)
             stop_on_error = _read_bool(arguments, "stop_on_error", True)
+            description = _optional_str(arguments, "description")
+            tags = _optional_str(arguments, "tags")
+            learn = _read_bool(arguments, "learn", False)
+            include_trace = _read_bool(arguments, "include_trace", False)
 
             sandbox = await get_sandbox(sandbox_id)
             async with asyncio.timeout(_SDK_CALL_TIMEOUT):
@@ -1361,12 +1418,25 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     commands,
                     timeout=timeout,
                     stop_on_error=stop_on_error,
+                    description=description,
+                    tags=tags,
+                    learn=learn,
+                    include_trace=include_trace,
                 )
 
             lines = [
                 f"**Batch execution {'completed' if result.success else 'failed'}** "
                 f"({result.completed_steps}/{result.total_steps} steps, {result.duration_ms}ms)\n"
             ]
+            execution_id = getattr(result, "execution_id", None)
+            execution_time_ms = getattr(result, "execution_time_ms", None)
+            trace_ref = getattr(result, "trace_ref", None)
+            if execution_id:
+                lines.append(f"execution_id: {execution_id}")
+            if execution_time_ms is not None:
+                lines.append(f"execution_time_ms: {execution_time_ms}")
+            if trace_ref:
+                lines.append(f"trace_ref: {trace_ref}")
             for step in result.results:
                 status_icon = "✅" if step.exit_code == 0 else "❌"
                 lines.append(

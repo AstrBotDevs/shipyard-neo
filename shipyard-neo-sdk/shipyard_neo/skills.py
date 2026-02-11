@@ -9,6 +9,7 @@ from shipyard_neo.types import (
     SkillCandidateList,
     SkillCandidateStatus,
     SkillEvaluationInfo,
+    SkillReleaseHealth,
     SkillReleaseInfo,
     SkillReleaseList,
     SkillReleaseStage,
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 class SkillManager:
     """Skill lifecycle API client."""
 
-    def __init__(self, http: "HTTPClient") -> None:
+    def __init__(self, http: HTTPClient) -> None:
         self._http = http
 
     async def create_candidate(
@@ -132,3 +133,7 @@ class SkillManager:
     async def rollback_release(self, release_id: str) -> SkillReleaseInfo:
         response = await self._http.post(f"/v1/skills/releases/{release_id}/rollback")
         return SkillReleaseInfo.model_validate(response)
+
+    async def get_release_health(self, release_id: str) -> SkillReleaseHealth:
+        response = await self._http.get(f"/v1/skills/releases/{release_id}/health")
+        return SkillReleaseHealth.model_validate(response)

@@ -128,6 +128,9 @@ class BrowserExecResult(BaseModel):
     output: str
     error: str | None = None
     exit_code: int | None = None
+    execution_id: str | None = None
+    execution_time_ms: int | None = None
+    trace_ref: str | None = None
 
 
 class BrowserBatchStepResult(BaseModel):
@@ -144,6 +147,24 @@ class BrowserBatchStepResult(BaseModel):
 class BrowserBatchExecResult(BaseModel):
     """Browser batch execution result."""
 
+    results: list[BrowserBatchStepResult]
+    total_steps: int
+    completed_steps: int
+    success: bool
+    duration_ms: int = 0
+    execution_id: str | None = None
+    execution_time_ms: int | None = None
+    trace_ref: str | None = None
+
+
+class BrowserSkillRunResult(BaseModel):
+    """Browser skill replay execution result."""
+
+    skill_key: str
+    release_id: str
+    execution_id: str
+    execution_time_ms: int
+    trace_ref: str | None = None
     results: list[BrowserBatchStepResult]
     total_steps: int
     completed_steps: int
@@ -189,9 +210,14 @@ class ExecutionHistoryEntry(BaseModel):
     execution_time_ms: int
     output: str | None = None
     error: str | None = None
+    payload_ref: str | None = None
     description: str | None = None
     tags: str | None = None
     notes: str | None = None
+    learn_enabled: bool = False
+    learn_status: str | None = None
+    learn_error: str | None = None
+    learn_processed_at: datetime | None = None
     created_at: datetime
 
 
@@ -208,6 +234,8 @@ class SkillCandidateStatus(str, Enum):
     DRAFT = "draft"
     EVALUATING = "evaluating"
     PROMOTED = "promoted"
+    PROMOTED_CANARY = "promoted_canary"
+    PROMOTED_STABLE = "promoted_stable"
     REJECTED = "rejected"
     ROLLED_BACK = "rolled_back"
 
@@ -226,6 +254,9 @@ class SkillCandidateInfo(BaseModel):
     skill_key: str
     scenario_key: str | None = None
     payload_ref: str | None = None
+    skill_type: str = "code"
+    auto_release_eligible: bool = False
+    auto_release_reason: str | None = None
     source_execution_ids: list[str]
     status: SkillCandidateStatus
     latest_score: float | None = None
@@ -266,9 +297,12 @@ class SkillReleaseInfo(BaseModel):
     version: int
     stage: SkillReleaseStage
     is_active: bool
+    release_mode: str = "manual"
     promoted_by: str | None = None
     promoted_at: datetime
     rollback_of: str | None = None
+    auto_promoted_from: str | None = None
+    health_window_end_at: datetime | None = None
 
 
 class SkillReleaseList(BaseModel):
@@ -276,6 +310,30 @@ class SkillReleaseList(BaseModel):
 
     items: list[SkillReleaseInfo]
     total: int
+
+
+class SkillReleaseHealth(BaseModel):
+    """Release health metrics and policy status."""
+
+    release_id: str
+    skill_key: str
+    stage: str
+    window_start_at: datetime
+    window_end_at: datetime
+    window_complete: bool
+    samples: int
+    success_rate: float
+    error_rate: float
+    p95_duration: int
+    baseline_success_rate: float
+    baseline_error_rate: float
+    baseline_samples: int
+    success_drop: float
+    error_rate_multiplier: float
+    healthy: bool
+    should_rollback: bool
+    rollback_reasons: list[str]
+    thresholds: dict[str, float]
 
 
 # Internal request models (not exported)
@@ -324,6 +382,10 @@ class _BrowserExecRequest(BaseModel):
 
     cmd: str
     timeout: int = Field(default=30, ge=1, le=300)
+    description: str | None = None
+    tags: str | None = None
+    learn: bool = False
+    include_trace: bool = False
 
 
 class _BrowserBatchExecRequest(BaseModel):
@@ -332,6 +394,20 @@ class _BrowserBatchExecRequest(BaseModel):
     commands: list[str] = Field(..., min_length=1)
     timeout: int = Field(default=60, ge=1, le=600)
     stop_on_error: bool = True
+    description: str | None = None
+    tags: str | None = None
+    learn: bool = False
+    include_trace: bool = False
+
+
+class _BrowserSkillRunRequest(BaseModel):
+    """Internal: Browser skill replay request body."""
+
+    timeout: int = Field(default=60, ge=1, le=600)
+    stop_on_error: bool = True
+    include_trace: bool = False
+    description: str | None = None
+    tags: str | None = None
 
 
 class _FileWriteRequest(BaseModel):

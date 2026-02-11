@@ -9,7 +9,7 @@ from shipyard_neo._http import HTTPClient
 from shipyard_neo.cargo import CargoManager
 from shipyard_neo.sandbox import Sandbox
 from shipyard_neo.skills import SkillManager
-from shipyard_neo.types import SandboxInfo, SandboxList, SandboxStatus, ProfileList
+from shipyard_neo.types import ProfileList, SandboxInfo, SandboxList, SandboxStatus
 
 
 class BayClient:
