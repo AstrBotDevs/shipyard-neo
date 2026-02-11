@@ -173,7 +173,39 @@ class SkillInjector:
 
 位置：`pkgs/bay/app/services/skills/renderer.py`
 
-将 skill candidate 的数据渲染为符合 skill-creator 规范的 SKILL.md 格式：
+将 skill release 数据渲染为符合 skill-creator 规范的 SKILL.md 格式。支持 **混合执行 (Hybrid Execution)** 序列。
+
+#### 4.2.1 混合执行负载结构
+
+需要支持三种类型的步骤：`browser`, `shell`, `python`。
+
+Payload 结构扩展：
+
+```json
+{
+  "kind": "hybrid_sequence",
+  "variables": {
+    "username": { "type": "string", "description": "Rancher username" },
+    "password": { "type": "string", "description": "Rancher password", "secret": true }
+  },
+  "steps": [
+    {
+      "type": "browser",
+      "cmd": "open https://rancher.rcfortress.site/"
+    },
+    {
+      "type": "browser",
+      "cmd": "fill @e1 \"{{username}}\""
+    },
+    {
+      "type": "python",
+      "code": "print('Login step completed')"
+    }
+  ]
+}
+```
+
+#### 4.2.2 渲染逻辑
 
 ```python
 class SkillMDRenderer:
@@ -188,69 +220,59 @@ class SkillMDRenderer:
         payload: dict | list | None,
         executions: list[ExecutionHistory],
     ) -> str:
-        # 根据 skill_type 选择不同渲染策略
-        if candidate.skill_type == SkillType.BROWSER:
+        # 支持混合序列渲染
+        if candidate.skill_type == SkillType.HYBRID:  # 新增 HYBRID 类型
+             return SkillMDRenderer._render_hybrid_skill(...)
+        elif candidate.skill_type == SkillType.BROWSER:
             return SkillMDRenderer._render_browser_skill(...)
         else:
             return SkillMDRenderer._render_code_skill(...)
 ```
 
-生成的 SKILL.md 示例（浏览器类型）：
+生成的 SKILL.md 示例（混合类型 + 变量）：
 
 ```markdown
 ---
-name: rancher-login-and-dashboard-screenshot
-description: "Login to Rancher dashboard and capture cluster status screenshot. 
-  This skill should be used when the user needs to access Rancher management 
-  panel, login with credentials, and capture cluster overview information."
+name: rancher-login-flow
+description: "Hybrid automation flow for Rancher login."
 metadata:
-  skill_type: browser
-  release_id: sr-94cc87f21c65
-  version: 1
-  stage: canary
-  scenario: rancher-cluster-inspection
-  source: learned
+  skill_type: hybrid
+  variables:
+    username: 
+      type: string
+      description: Rancher username
+    password: 
+      type: string
+      description: Rancher password
 ---
 
-# Rancher Login and Dashboard Screenshot
+# Rancher Login Flow
 
-This is a learned browser automation skill for logging into 
-Rancher and capturing cluster dashboard screenshots.
+Hybrid sequence combining browser automation and python checks.
 
-## Prerequisites
+## Variables
 
-- Browser-enabled sandbox (profile: browser-python)
-- Rancher URL and credentials
+| Name | Type | Description |
+|------|------|-------------|
+| `username` | string | Rancher username |
+| `password` | string | Rancher password |
 
 ## Workflow Steps
 
-1. **Navigate**: `open <rancher_url>`
-2. **Snapshot**: `snapshot -i` to identify login form elements
-3. **Fill Username**: `fill @<username_ref> "<username>"`
-4. **Fill Password**: `fill @<password_ref> "<password>"`
-5. **Login**: `click @<login_button_ref>`
-6. **Wait**: `wait --load networkidle`
-7. **Verify**: `snapshot -i` to confirm dashboard loaded
-8. **Screenshot**: `screenshot /workspace/<output_path>`
-
-## Source Evidence
-
-| Step | Description | Execution ID |
-|------|-------------|-------------|
-| 1 | 打开 Rancher 面板页面 | exec-c8caaaf5081b |
-| 2 | 获取登录页面快照 | exec-4abd8169930f |
-| 3 | 填写用户名 | exec-69a442c72832 |
-| 4 | 填写密码 | exec-49bab88d1139 |
-| 5 | 点击登录按钮 | exec-787023910c11 |
-| 6 | 确认登录成功 | exec-def3560c293e |
-| 7 | 截图仪表盘 | exec-1ad6f559f6dc |
+1. **browser**: `open https://rancher.rcfortress.site/`
+2. **browser**: `fill @e1 "{{username}}"`
+3. **python**: `print('Login step completed')`
 
 ## Replay
 
-To replay this skill programmatically:
-
-```
-POST /{sandbox_id}/browser/skills/rancher-login-and-dashboard-screenshot/run
+```python
+execute_hybrid_skill(
+    skill_key="rancher-login-flow",
+    variables={
+        "username": "admin",
+        "password": "..."
+    }
+)
 ```
 ```
 
@@ -339,12 +361,12 @@ skill_injection:
 
 ## 7. 实施步骤
 
-- [ ] 新增 `SkillMDRenderer` 类，实现 SKILL.md 模板渲染
+- [ ] 新增 `SkillMDRenderer` 类，实现 SKILL.md 模板渲染（支持 HYBRID 类型）
 - [ ] 新增 `SkillInjector` 服务，实现查询 + 渲染 + 写入逻辑
 - [ ] 在 `Session` 模型增加 `skills_injected_at` 字段
 - [ ] 在 `SandboxManager.ensure_running()` 中增加注入钩子
 - [ ] 增加 `skill_injection` 配置项
-- [ ] 编写单元测试：SkillMDRenderer 渲染正确性
+- [ ] 编写单元测试：SkillMDRenderer 渲染正确性（Browser + Hybrid）
 - [ ] 编写单元测试：SkillInjector 幂等性和错误处理
 - [ ] 编写集成测试：learned skills 出现在 /workspace/.skills/ 中
 - [ ] 编写集成测试：与 built-in skills 共存不冲突
