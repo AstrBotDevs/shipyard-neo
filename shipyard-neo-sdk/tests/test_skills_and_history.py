@@ -118,6 +118,58 @@ class TestSkillsManagerAndHistory:
         assert params["has_description"] == "true"
 
     @pytest.mark.asyncio
+    async def test_history_parses_browser_learning_fields(self, httpx_mock, mock_sandbox_response):
+        """History entries should parse payload_ref and browser learning fields."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/sandboxes",
+            json=mock_sandbox_response,
+            status_code=201,
+        )
+        httpx_mock.add_response(
+            method="GET",
+            url=re.compile(r"http://localhost:8000/v1/sandboxes/sbx_123/history.*"),
+            json={
+                "entries": [
+                    {
+                        "id": "exec-browser-1",
+                        "session_id": "sess-browser",
+                        "exec_type": "browser_batch",
+                        "code": "open about:blank\nsnapshot -i",
+                        "success": True,
+                        "execution_time_ms": 12,
+                        "output": "ok\n",
+                        "error": None,
+                        "payload_ref": "blob:trace-123",
+                        "description": "browser learn run",
+                        "tags": "skill:browser-checkout,trace",
+                        "notes": None,
+                        "learn_enabled": True,
+                        "learn_status": "pending",
+                        "learn_error": None,
+                        "learn_processed_at": None,
+                        "created_at": "2026-02-10T00:00:00Z",
+                    }
+                ],
+                "total": 1,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            sandbox = await client.create_sandbox()
+            history = await sandbox.get_execution_history(exec_type="browser_batch")
+            assert history.total == 1
+            entry = history.entries[0]
+            assert entry.exec_type == "browser_batch"
+            assert entry.payload_ref == "blob:trace-123"
+            assert entry.learn_enabled is True
+            assert entry.learn_status == "pending"
+
+    @pytest.mark.asyncio
     async def test_python_exec_forwards_history_metadata_fields(
         self, httpx_mock, mock_sandbox_response
     ):
@@ -311,3 +363,81 @@ class TestSkillsManagerAndHistory:
             assert rollback.id == "sr-3"
             assert rollback.rollback_of == "sr-2"
             assert rollback.stage.value == "stable"
+
+    @pytest.mark.asyncio
+    async def test_skills_get_release_health(self, httpx_mock):
+        """skills.get_release_health should parse health payload."""
+        httpx_mock.add_response(
+            method="GET",
+            url="http://localhost:8000/v1/skills/releases/sr-1/health",
+            json={
+                "release_id": "sr-1",
+                "skill_key": "browser-login",
+                "stage": "canary",
+                "window_start_at": "2026-02-08T00:00:00Z",
+                "window_end_at": "2026-02-09T00:00:00Z",
+                "window_complete": False,
+                "samples": 48,
+                "success_rate": 0.98,
+                "error_rate": 0.02,
+                "p95_duration": 2100,
+                "baseline_success_rate": 0.99,
+                "baseline_error_rate": 0.01,
+                "baseline_samples": 120,
+                "success_drop": 0.01,
+                "error_rate_multiplier": 2.0,
+                "healthy": True,
+                "should_rollback": False,
+                "rollback_reasons": [],
+                "thresholds": {"success_drop": 0.03, "error_rate_multiplier": 2.0},
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            health = await client.skills.get_release_health("sr-1")
+            assert health.release_id == "sr-1"
+            assert health.samples == 48
+            assert health.healthy is True
+
+    @pytest.mark.asyncio
+    async def test_skills_get_release_health_parses_rollback_signals(self, httpx_mock):
+        """skills.get_release_health should parse rollback reason payload."""
+        httpx_mock.add_response(
+            method="GET",
+            url="http://localhost:8000/v1/skills/releases/sr-risky/health",
+            json={
+                "release_id": "sr-risky",
+                "skill_key": "browser-checkout",
+                "stage": "canary",
+                "window_start_at": "2026-02-08T00:00:00Z",
+                "window_end_at": "2026-02-09T00:00:00Z",
+                "window_complete": False,
+                "samples": 20,
+                "success_rate": 0.70,
+                "error_rate": 0.30,
+                "p95_duration": 3100,
+                "baseline_success_rate": 0.96,
+                "baseline_error_rate": 0.04,
+                "baseline_samples": 120,
+                "success_drop": 0.26,
+                "error_rate_multiplier": 7.5,
+                "healthy": False,
+                "should_rollback": True,
+                "rollback_reasons": ["success_rate_drop", "error_rate_regression"],
+                "thresholds": {"success_drop": 0.03, "error_rate_multiplier": 2.0},
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            health = await client.skills.get_release_health("sr-risky")
+            assert health.should_rollback is True
+            assert health.rollback_reasons == ["success_rate_drop", "error_rate_regression"]
+            assert health.thresholds["error_rate_multiplier"] == 2.0

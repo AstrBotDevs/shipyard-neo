@@ -141,14 +141,22 @@ jobs:
         working-directory: pkgs/bay
         run: uv sync --frozen
 
+      - name: Run P0 browser contract unit tests
+        run: |
+          uv run --project pkgs/gull pytest pkgs/gull/tests/unit/test_runner.py -v --tb=short
+          uv run --project pkgs/bay pytest \
+            pkgs/bay/tests/unit/adapters/test_gull_adapter.py \
+            pkgs/bay/tests/unit/api/test_capabilities_browser_exec_batch_contract.py \
+            -v --tb=short
+
       - name: Build local runtime images for browser e2e
         run: |
           docker build -t ship:latest pkgs/ship
           docker build -t gull:latest pkgs/gull
 
-      - name: Run Gull integration contract tests
+      - name: Run key P1 Gull batch integration tests
         working-directory: pkgs/gull
-        run: uv run pytest tests/integration/test_gull_api.py -v --tb=short
+        run: uv run pytest tests/integration/test_gull_api.py::TestBatchExec -v --tb=short
 
       - name: Prepare Bay e2e config
         run: |
@@ -210,11 +218,14 @@ jobs:
           cat /tmp/bay-e2e.log || true
           exit 1
 
-      - name: Run Bay browser batch contract e2e
+      - name: Run key P1 Bay browser failure-path e2e
         working-directory: pkgs/bay
         env:
           E2E_BAY_PORT: "8001"
-        run: uv run pytest tests/integration/core/test_browser_exec_batch_contract_e2e.py -v --tb=short
+        run: |
+          uv run pytest \
+            tests/integration/core/test_browser_skill_e2e.py::test_browser_exec_batch_failure_keeps_response_history_trace_consistent \
+            -v --tb=short
 
       - name: Dump Bay logs on failure
         if: failure()

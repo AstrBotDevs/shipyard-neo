@@ -189,6 +189,22 @@ class TestBatchExec:
         assert len(data["results"]) == 3
         assert any(step["exit_code"] != 0 for step in data["results"])
 
+    def test_exec_batch_timeout_causes_partial_completion(self, gull_container: str):
+        data = _exec_batch(
+            gull_container,
+            commands=["open about:blank", "wait 20000", "get title"],
+            timeout=1,
+            stop_on_error=True,
+        )
+
+        assert data["total_steps"] == 3
+        assert data["completed_steps"] == 2
+        assert data["success"] is False
+        assert len(data["results"]) == 2
+        assert data["results"][-1]["cmd"] == "wait 20000"
+        assert data["results"][-1]["exit_code"] != 0
+        assert "timed out" in data["results"][-1]["stderr"].lower()
+
 
 # ---------------------------------------------------------------------------
 # Exec — Navigation
