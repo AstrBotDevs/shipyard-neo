@@ -5,3 +5,5 @@ AGENTS.md
 .kilocode/
 __pycache__/
 scripts/
+.codex/
+.claude/
