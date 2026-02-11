@@ -169,3 +169,35 @@ async def test_health_returns_false_on_malformed_payload(monkeypatch: pytest.Mon
     assert await adapter.health() is False
 
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_health_returns_false_when_http_status_not_200(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"status": "healthy"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://gull")
+    monkeypatch.setattr(gull_mod, "_get_shared_client", lambda: client)
+
+    adapter = GullAdapter("http://gull")
+    assert await adapter.health() is False
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_health_returns_false_when_payload_status_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"browser_active": True, "session": "s"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://gull")
+    monkeypatch.setattr(gull_mod, "_get_shared_client", lambda: client)
+
+    adapter = GullAdapter("http://gull")
+    assert await adapter.health() is False
+
+    await client.aclose()
