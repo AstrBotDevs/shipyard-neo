@@ -352,6 +352,21 @@ class SkillReleaseHealth(BaseModel):
     thresholds: dict[str, float]
 
 
+class SkillPayloadCreateInfo(BaseModel):
+    """Skill payload create response."""
+
+    payload_ref: str
+    kind: str
+
+
+class SkillPayloadInfo(BaseModel):
+    """Skill payload lookup response."""
+
+    payload_ref: str
+    kind: str
+    payload: dict[str, Any] | list[Any]
+
+
 # Internal request models (not exported)
 #
 # These are SDK-internal helpers to build request bodies consistently and
@@ -424,6 +439,13 @@ class _BrowserSkillRunRequest(BaseModel):
     include_trace: bool = False
     description: str | None = None
     tags: str | None = None
+
+
+class _SkillPayloadCreateRequest(BaseModel):
+    """Internal: Skill payload create request body."""
+
+    payload: dict[str, Any] | list[Any]
+    kind: str = Field(default="generic", min_length=1)
 
 
 class _FileWriteRequest(BaseModel):
