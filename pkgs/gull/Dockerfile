@@ -33,13 +33,20 @@ RUN npm install -g agent-browser \
 # Keep README.md in build context because pyproject.toml declares it as the project readme.
 COPY pyproject.toml uv.lock README.md ./
 COPY app ./app
+COPY skills ./skills
 
 RUN uv sync --frozen --no-dev
+
+# Entrypoint: injects built-in skills into /workspace/.skills/ before starting
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Runtime defaults
 ENV BAY_WORKSPACE_PATH=/workspace
 
 EXPOSE 8080
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Use uv to run within the synced environment.
 # --loop asyncio: Force standard asyncio event loop instead of uvloop.

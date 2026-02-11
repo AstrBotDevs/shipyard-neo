@@ -7,6 +7,7 @@ from .components.term import router as term_router
 from .workspace import WORKSPACE_ROOT
 import logging
 import os
+import re
 import tomli
 from pathlib import Path
 
@@ -82,6 +83,51 @@ def get_build_info() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Built-in skills helpers
+# ---------------------------------------------------------------------------
+
+SKILLS_SRC_DIR = Path("/app/skills")
+
+
+def _scan_built_in_skills(root: Path = SKILLS_SRC_DIR) -> list[dict]:
+    """Scan /app/skills/*/SKILL.md, parse YAML frontmatter, return metadata."""
+    skills: list[dict] = []
+    if not root.exists():
+        return skills
+
+    for skill_dir in sorted(root.iterdir()):
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        try:
+            text = skill_md.read_text(encoding="utf-8")
+            meta = _parse_frontmatter(text)
+            skills.append(
+                {
+                    "name": meta.get("name", skill_dir.name),
+                    "description": meta.get("description", ""),
+                    "path": str(skill_md),
+                }
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to parse %s: %s", skill_md, exc)
+    return skills
+
+
+def _parse_frontmatter(text: str) -> dict:
+    """Extract YAML frontmatter from markdown text (simple parser)."""
+    match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+    if not match:
+        return {}
+    result: dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            result[key.strip()] = value.strip().strip("'\"")
+    return result
+
+
 @app.get("/meta")
 async def get_meta():
     """Runtime self-description endpoint.
@@ -144,6 +190,7 @@ async def get_meta():
                 },
             },
         },
+        "built_in_skills": _scan_built_in_skills(),
     }
 
 

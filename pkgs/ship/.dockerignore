@@ -36,9 +36,10 @@ dist/
 .git/
 .gitignore
 
-# Documentation
+# Documentation (exclude .md except README and skills)
 *.md
 !README.md
+!skills/**
 
 # Logs
 *.log
@@ -53,8 +54,8 @@ uv.lock
 # Tests (not needed in production image)
 tests/
 
-# Skills documentation
-skills/
+# Built-in skills are included in the image for workspace injection
+# skills/
 
 # Makefile (not needed in image)
 Makefile

@@ -18,14 +18,19 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import re
 import shlex
 import shutil
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # Configuration from environment
 SESSION_NAME = os.environ.get("SANDBOX_ID", os.environ.get("BAY_SANDBOX_ID", "default"))
@@ -101,6 +106,7 @@ class MetaResponse(BaseModel):
     runtime: dict
     workspace: dict
     capabilities: dict
+    built_in_skills: list[dict] = []
 
 
 async def _run_agent_browser(
@@ -171,6 +177,51 @@ async def _run_agent_browser(
         return "", f"Failed to execute command: {e}", -1
 
 
+# ---------------------------------------------------------------------------
+# Built-in skills helpers
+# ---------------------------------------------------------------------------
+
+SKILLS_SRC_DIR = Path("/app/skills")
+
+
+def _scan_built_in_skills(root: Path = SKILLS_SRC_DIR) -> list[dict]:
+    """Scan /app/skills/*/SKILL.md, parse YAML frontmatter, return metadata."""
+    skills: list[dict] = []
+    if not root.exists():
+        return skills
+
+    for skill_dir in sorted(root.iterdir()):
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        try:
+            text = skill_md.read_text(encoding="utf-8")
+            meta = _parse_frontmatter(text)
+            skills.append(
+                {
+                    "name": meta.get("name", skill_dir.name),
+                    "description": meta.get("description", ""),
+                    "path": str(skill_md),
+                }
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to parse %s: %s", skill_md, exc)
+    return skills
+
+
+def _parse_frontmatter(text: str) -> dict:
+    """Extract YAML frontmatter from markdown text (simple parser)."""
+    match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+    if not match:
+        return {}
+    result: dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            result[key.strip()] = value.strip().strip("'\"")
+    return result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager.
@@ -183,6 +234,9 @@ async def lifespan(app: FastAPI):
     On shutdown:
     - Close the browser session. agent-browser --profile automatically
       persists state to the profile directory.
+
+    Note: Built-in skills injection is handled by entrypoint.sh (shell layer),
+    not in Python lifespan, for security and consistency with Ship.
     """
     # Ensure profile dir exists on shared Cargo Volume
     os.makedirs(BROWSER_PROFILE_DIR, exist_ok=True)
@@ -355,4 +409,5 @@ async def meta() -> MetaResponse:
         capabilities={
             "browser": {"version": "1.0"},
         },
+        built_in_skills=_scan_built_in_skills(),
     )

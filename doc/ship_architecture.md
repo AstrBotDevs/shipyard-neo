@@ -1,7 +1,7 @@
 # Ship 架构文档
 
 > **状态**: 完整版
-> **最后更新**: 2026-02-10
+> **最后更新**: 2026-02-11
 
 ## 1. 概述
 
@@ -61,8 +61,8 @@ pkgs/ship/
 │       ├── shell.py          # Shell 命令路由
 │       ├── term.py           # WebSocket 交互式终端 (PTY)
 │       └── user_manager.py   # 命令执行引擎（sudo shipyard、进程管理）
-├── skills/                   # 内置 skill（如 PDF 处理）
-│   └── pdf/SKILL.md
+├── skills/                   # 内置 skill（构建时打包进镜像，启动时注入 workspace）
+│   └── python-sandbox/SKILL.md
 └── tests/
     ├── e2e/                  # 端到端测试
     └── unit/                 # 单元测试
@@ -229,7 +229,8 @@ python:3.13-slim-bookworm
 [`entrypoint.sh`](../pkgs/ship/entrypoint.sh) 在容器启动时：
 
 1. 修复 `/workspace` 目录所有权为 `shipyard:shipyard`（处理卷挂载权限问题）
-2. `exec "$@"` 执行 CMD（即 `python run.py`）
+2. 注入内置 skills 到 `/workspace/.skills/`（per-skill overwrite，见 [§10](#10-扩展机制--built-in-skills-注入)）
+3. `exec "$@"` 执行 CMD（即 `python run.py`）
 
 ### 5.4 应用启动流程
 
@@ -362,9 +363,18 @@ Ship 的 `/meta` 端点返回完整的运行时自描述信息，Bay 用此进�
       "protocol": "websocket",
       "endpoints": { ... }
     }
-  }
+  },
+  "built_in_skills": [
+    {
+      "name": "python-sandbox",
+      "description": "Ship runtime usage guide for code execution sandboxes...",
+      "path": "/app/skills/python-sandbox/SKILL.md"
+    }
+  ]
 }
 ```
+
+> **注意**: `built_in_skills` 字段由 [`_scan_built_in_skills()`](../pkgs/ship/app/main.py:93) 在请求时扫描 `/app/skills/*/SKILL.md` 并解析 YAML frontmatter 生成。`path` 字段返回的是镜像内路径，用于诊断。
 
 ### 6.5 连接池
 
@@ -702,48 +712,114 @@ IPython 执行错误不通过 HTTP 错误码返回，而是在响应体中标识
 
 ---
 
-## 10. 扩展机制 — Skills 目录
+## 10. 扩展机制 — Built-in Skills 注入
 
-Ship 容器内可包含 **Skills**（技能文件），位于 [`skills/`](../pkgs/ship/skills/) 目录下。Skills 是 **结构化的知识文档**，用于指导 AI Agent 如何使用容器内预装的工具和库。
+Ship 和 Gull 容器各自携带 **Built-in Skills**（内置技能文件），在容器启动时自动注入到共享 Cargo Volume 的 `/workspace/.skills/` 目录。Skills 是 **结构化的知识文档**，用于指导 AI Agent 如何使用容器内预装的工具和库。
 
-### 10.1 目录结构
+### 10.1 注入机制
+
+#### 容器自注入（Container Self-Injection）
+
+每个容器镜像在构建时将 skills 打包到 `/app/skills/` 目录，容器启动时通过 [`entrypoint.sh`](../pkgs/ship/entrypoint.sh) 注入到共享的 `/workspace/.skills/`：
 
 ```
-skills/
-└── pdf/
-    └── SKILL.md      # PDF 处理技能指南
+┌──── Ship 镜像 ────┐    启动时注入     ┌──── Cargo Volume ────────────────────┐
+│  /app/skills/      │ ═══════════════▶ │  /workspace/.skills/                 │
+│  └─ python-sandbox/│    rm -rf + cp   │  ├── python-sandbox/   ← Ship 注入   │
+│     └─ SKILL.md    │                  │  │   └── SKILL.md                    │
+└────────────────────┘                  │  ├── browser-automation/ ← Gull 注入  │
+                                        │  │   ├── SKILL.md                    │
+┌──── Gull 镜像 ────┐    启动时注入     │  │   └── references/                 │
+│  /app/skills/      │ ═══════════════▶ │  │       └── browser.md              │
+│  └─ browser-       │    rm -rf + cp   │  └── my-custom-skill/  ← Agent 自定义 │
+│     automation/    │                  │      └── SKILL.md                    │
+│     ├─ SKILL.md    │                  └──────────────────────────────────────┘
+│     └─ references/ │
+│        └─ browser.md│
+└────────────────────┘
 ```
 
-### 10.2 SKILL.md 格式
+#### 铺平命名空间（Flat Namespace）
 
-每个 Skill 包含一个 `SKILL.md` 文件，带有 YAML frontmatter：
+所有 skills 直接放在 `/workspace/.skills/<skill_name>/` 下，**不分 runtime 子目录**。Ship 和 Gull 的 built-in skill 使用不同名称避免冲突。上层 agent 也可以在此目录下自由添加自定义 skill。
+
+#### Per-skill Overwrite（幂等覆盖）
+
+注入时按 skill 级别逐个覆盖：
+
+```bash
+for skill_dir in /app/skills/*/; do
+    skill_name=$(basename "$skill_dir")
+    rm -rf "/workspace/.skills/$skill_name"   # 只删除本 skill
+    cp -r "$skill_dir" "/workspace/.skills/$skill_name"
+done
+```
+
+**关键特性**：
+- 每个容器只覆盖自己管理的 skill，不影响其他容器的 built-in skill 和 agent 的自定义 skill
+- 容器重启后 built-in skill 恢复为镜像版本（idempotent）
+- 用户修改的 built-in skill 会在下次容器启动时被覆盖（by design）
+
+### 10.2 镜像构建配置
+
+#### Ship
+
+- [`.dockerignore`](../pkgs/ship/.dockerignore) 显式允许 `skills/**` 进入镜像
+- `Dockerfile` 使用 `COPY . .` 将 skills 目录包含在内
+- [`entrypoint.sh`](../pkgs/ship/entrypoint.sh) 中实现 shell 注入逻辑，注入后执行 `chown -R shipyard:shipyard`
+
+#### Gull
+
+- [`Dockerfile`](../pkgs/gull/Dockerfile) 显式 `COPY skills ./skills`
+- [`entrypoint.sh`](../pkgs/gull/entrypoint.sh) 中实现 shell 注入逻辑（与 Ship 一致的 per-skill overwrite）
+
+### 10.3 SKILL.md 格式
+
+每个 Skill 目录至少包含一个 `SKILL.md` 文件，带有 YAML frontmatter：
 
 ```yaml
 ---
-name: pdf
-description: Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms.
+name: python-sandbox
+description: "Ship runtime usage guide for code execution sandboxes..."
 ---
 ```
 
-文件正文包含：
+可选附加文件：
+- `references/*.md` — 更详细的参考资料
+- `scripts/` — 辅助脚本（未来扩展）
+- `assets/` — 静态资源（未来扩展）
 
-- **Quick Start**: 快速上手示例
-- **工具/库参考**: 各库的使用方法和代码示例
-- **最佳实践**: 推荐的工作流程
+### 10.4 内置 Skills
 
-### 10.3 内置 Skills
+| 容器 | Skill | 描述 | 文件 |
+|------|-------|------|------|
+| Ship | `python-sandbox` | Python/Shell/Filesystem 执行指南 | [`SKILL.md`](../pkgs/ship/skills/python-sandbox/SKILL.md) |
+| Gull | `browser-automation` | 浏览器自动化操作指南 | [`SKILL.md`](../pkgs/gull/skills/browser-automation/SKILL.md) + [`references/browser.md`](../pkgs/gull/skills/browser-automation/references/browser.md) |
 
-| Skill | 描述 | 依赖库 |
-|-------|------|-------|
-| `pdf` | PDF 读取、创建、合并、拆分、表格提取、表单填写 | pypdf, pdfplumber, reportlab |
+### 10.5 `/meta` 端点暴露
 
-### 10.4 设计理念
+Ship 和 Gull 的 `/meta` 端点均返回 `built_in_skills` 字段，列出镜像内打包的所有 skill 元数据。Bay 和 MCP 层可通过此字段观测容器携带了哪些 built-in skill。
+
+扫描逻辑：[`_scan_built_in_skills()`](../pkgs/ship/app/main.py:93) 遍历 `/app/skills/*/SKILL.md`，解析 YAML frontmatter 提取 `name` 和 `description`。
+
+### 10.6 三层 Skill 体系
+
+Shipyard Neo 中有三个层级的 skill，各自独立管理：
+
+| 层级 | 位置（源码） | 位置（运行时） | 管理者 |
+|------|-------------|---------------|--------|
+| MCP 层 | `skills/shipyard-neo/` | Agent 本地 `.kilocode/skills/` | MCP Server / Agent 框架 |
+| Ship 内置 | `pkgs/ship/skills/` | `/workspace/.skills/` | Ship 容器 entrypoint |
+| Gull 内置 | `pkgs/gull/skills/` | `/workspace/.skills/` | Gull 容器 entrypoint |
+
+### 10.7 设计理念
 
 Skills 不是可执行代码插件，而是 **知识增强** 机制：
 
 - AI Agent 在需要特定能力时，读取对应的 SKILL.md
-- SKILL.md 提供该领域的完整操作指南和代码模板
+- SKILL.md 提供该领域的完整操作指南、代码模板和安全约束
 - Agent 根据指南生成代码，通过 `/ipython/exec` 或 `/shell/exec` 执行
+- 容器自注入确保 skills 始终与镜像版本一致，无需外部协调
 
 ---
 
