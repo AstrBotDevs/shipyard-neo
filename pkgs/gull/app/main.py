@@ -56,25 +56,36 @@ WORKSPACE_PATH = os.environ.get("BAY_WORKSPACE_PATH", "/workspace")
 BROWSER_PROFILE_DIR = os.path.join(WORKSPACE_PATH, ".browser", "profile")
 GULL_VERSION = get_version()
 
-# Browser readiness state - set to True after successful pre-warming in lifespan.
-# Interpreted as: "agent-browser daemon has been started with our desired profile".
+# Browser readiness state.
+# Interpreted as: "agent-browser CLI/daemon is responsive".
+#
+# Note: This does NOT guarantee the daemon was started with our desired
+# `--profile` (see _ensure_browser_ready() for the trade-off).
 _browser_ready: bool = False
 _browser_ready_lock: asyncio.Lock | None = None
 
 
 async def _ensure_browser_ready() -> None:
-    """Ensure the agent-browser daemon is started with the intended profile.
+    """Ensure agent-browser is ready, while avoiding noisy daemon warnings.
 
-    Why: agent-browser uses a long-lived daemon process. Passing `--profile`
-    for every command is noisy because when the daemon is already running,
-    agent-browser prints a warning that `--profile` is ignored.
+    Problem:
+      agent-browser uses a long-lived daemon process. If we pass `--profile`
+      on every command while the daemon is already running, agent-browser prints
+      a warning to stderr that `--profile` is ignored.
 
-    Strategy:
-    - Start (or pre-warm) the daemon once with `--profile`.
-    - For subsequent commands, omit `--profile` to avoid the warning.
+    Strategy ("B"):
+      1) Probe agent-browser without `--profile`.
+         - If it is responsive, mark `_browser_ready=True` and stop injecting
+           `--profile` for subsequent commands (eliminates the warning).
+      2) If probe fails, start/pre-warm once with `--profile`.
 
-    If pre-warm fails, we keep `_browser_ready=False` and fall back to including
-    `--profile` in the actual exec path (best-effort persistence).
+    Trade-off:
+      If a daemon is already running but was started without our desired profile,
+      we choose to accept the existing daemon (avoid restarts) and suppress the
+      warning by omitting `--profile` in subsequent commands.
+
+      If you must guarantee the profile is applied, you would need an explicit
+      close → open(with profile) restart policy (not implemented here).
     """
     global _browser_ready, _browser_ready_lock
 
@@ -88,7 +99,20 @@ async def _ensure_browser_ready() -> None:
         if _browser_ready:
             return
 
-        stdout, stderr, code = await _run_agent_browser(
+        # Probe without --profile to avoid daemon warning.
+        _, _, probe_code = await _run_agent_browser(
+            "session list",
+            session=None,
+            profile=None,
+            timeout=5,
+        )
+        if probe_code == 0:
+            _browser_ready = True
+            logger.info("[gull] agent-browser probe OK (daemon/CLI responsive)")
+            return
+
+        # Pre-warm: start the daemon with our desired profile.
+        _, stderr, code = await _run_agent_browser(
             "open about:blank",
             session=SESSION_NAME,
             profile=BROWSER_PROFILE_DIR,
@@ -363,7 +387,10 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
         {"cmd": "fill @e2 'hello world'"}
         {"cmd": "screenshot /workspace/page.png"}
     """
-    # If lifespan pre-warm succeeded, omit --profile to avoid agent-browser daemon warnings.
+    # Make sure readiness is evaluated even if lifespan pre-warm didn't run yet.
+    await _ensure_browser_ready()
+
+    # If readiness probe/pre-warm succeeded, omit --profile to avoid agent-browser daemon warnings.
     profile = None if _browser_ready else BROWSER_PROFILE_DIR
     stdout, stderr, exit_code = await _run_agent_browser(
         request.cmd,
@@ -398,6 +425,9 @@ async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
             "stop_on_error": true
         }
     """
+    # Make sure readiness is evaluated even if lifespan pre-warm didn't run yet.
+    await _ensure_browser_ready()
+
     batch_start = time.perf_counter()
     results: list[BatchStepResult] = []
 

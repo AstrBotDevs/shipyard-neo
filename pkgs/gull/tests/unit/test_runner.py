@@ -135,8 +135,14 @@ async def test_exec_batch_stops_when_budget_exhausted_before_next_step(
         captured_timeouts.append(kwargs["timeout"])
         return "ok", "", 0
 
+    async def fake_ensure_ready() -> None:
+        # exec_batch() now calls _ensure_browser_ready() once before executing steps.
+        # Patch it out here so we can assert purely on per-step timeout budgeting.
+        return None
+
     perf_values = iter([0.0, 0.0, 0.0, 1.3, 2.2, 2.2])
     monkeypatch.setattr(gull_main.time, "perf_counter", lambda: next(perf_values))
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
     response = await gull_main.exec_batch(
@@ -164,8 +170,14 @@ async def test_exec_batch_uses_remaining_budget_without_forced_minimum(
         captured_timeouts.append(kwargs["timeout"])
         return "ok", "", 0
 
+    async def fake_ensure_ready() -> None:
+        # exec_batch() now calls _ensure_browser_ready() once before executing steps.
+        # Patch it out here so we can assert purely on per-step timeout budgeting.
+        return None
+
     perf_values = iter([0.0, 1.7, 1.7, 1.95, 2.0])
     monkeypatch.setattr(gull_main.time, "perf_counter", lambda: next(perf_values))
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
     response = await gull_main.exec_batch(
@@ -195,6 +207,11 @@ async def test_exec_batch_stop_on_error_true_stops_at_first_failure(
             return "", "step failed", 2
         return "ok", "", 0
 
+    async def fake_ensure_ready() -> None:
+        # exec_batch() calls _ensure_browser_ready() once before executing steps.
+        # Patch it out so this test asserts only stop-on-error behavior.
+        return None
+
     tick = {"value": 0.0}
 
     def fake_perf_counter() -> float:
@@ -202,6 +219,7 @@ async def test_exec_batch_stop_on_error_true_stops_at_first_failure(
         return tick["value"]
 
     monkeypatch.setattr(gull_main.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
     response = await gull_main.exec_batch(
@@ -232,6 +250,11 @@ async def test_exec_batch_stop_on_error_false_continues_but_stays_unsuccessful(
             return "", "step failed", 1
         return "ok", "", 0
 
+    async def fake_ensure_ready() -> None:
+        # exec_batch() calls _ensure_browser_ready() once before executing steps.
+        # Patch it out so this test asserts only stop-on-error=False behavior.
+        return None
+
     tick = {"value": 0.0}
 
     def fake_perf_counter() -> float:
@@ -239,6 +262,7 @@ async def test_exec_batch_stop_on_error_false_continues_but_stays_unsuccessful(
         return tick["value"]
 
     monkeypatch.setattr(gull_main.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
     response = await gull_main.exec_batch(
@@ -364,7 +388,13 @@ async def test_lifespan_prewarm_sets_browser_ready_on_success(
     monkeypatch.setattr(gull_main, "_browser_ready", False)
 
     async def fake_run(cmd: str, **_kwargs):
-        return "ok", "", 0
+        # _ensure_browser_ready() probes first with `session list`.
+        # Make the probe fail so lifespan then exercises the open/about:blank pre-warm path.
+        if cmd == "session list":
+            return "", "probe failed", 2
+        if "open" in cmd:
+            return "ok", "", 0
+        return "", "", 0  # close command
 
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
@@ -385,6 +415,9 @@ async def test_lifespan_prewarm_stays_false_on_nonzero_exit(
     monkeypatch.setattr(gull_main, "_browser_ready", False)
 
     async def fake_run(cmd: str, **_kwargs):
+        # Make probe fail so we actually attempt pre-warm open/about:blank.
+        if cmd == "session list":
+            return "", "probe failed", 2
         if "open" in cmd:
             return "", "browser failed to start", 1
         return "", "", 0  # close command
@@ -405,6 +438,9 @@ async def test_lifespan_prewarm_stays_false_on_exception(
     monkeypatch.setattr(gull_main, "_browser_ready", False)
 
     async def fake_run(cmd: str, **_kwargs):
+        # Make probe fail so we actually attempt pre-warm open/about:blank.
+        if cmd == "session list":
+            return "", "probe failed", 2
         if "open" in cmd:
             raise RuntimeError("agent-browser crashed")
         return "", "", 0  # close command
