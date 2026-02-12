@@ -45,6 +45,8 @@ def get_version() -> str:
         return "unknown"
 
 
+
+
 # Configuration from environment
 SESSION_NAME = os.environ.get("SANDBOX_ID", os.environ.get("BAY_SANDBOX_ID", "default"))
 WORKSPACE_PATH = os.environ.get("BAY_WORKSPACE_PATH", "/workspace")
@@ -55,8 +57,52 @@ BROWSER_PROFILE_DIR = os.path.join(WORKSPACE_PATH, ".browser", "profile")
 GULL_VERSION = get_version()
 
 # Browser readiness state - set to True after successful pre-warming in lifespan.
-# Safe for concurrent reads: single write in lifespan, multiple reads in /health.
+# Interpreted as: "agent-browser daemon has been started with our desired profile".
 _browser_ready: bool = False
+_browser_ready_lock: asyncio.Lock | None = None
+
+
+async def _ensure_browser_ready() -> None:
+    """Ensure the agent-browser daemon is started with the intended profile.
+
+    Why: agent-browser uses a long-lived daemon process. Passing `--profile`
+    for every command is noisy because when the daemon is already running,
+    agent-browser prints a warning that `--profile` is ignored.
+
+    Strategy:
+    - Start (or pre-warm) the daemon once with `--profile`.
+    - For subsequent commands, omit `--profile` to avoid the warning.
+
+    If pre-warm fails, we keep `_browser_ready=False` and fall back to including
+    `--profile` in the actual exec path (best-effort persistence).
+    """
+    global _browser_ready, _browser_ready_lock
+
+    if _browser_ready:
+        return
+
+    if _browser_ready_lock is None:
+        _browser_ready_lock = asyncio.Lock()
+
+    async with _browser_ready_lock:
+        if _browser_ready:
+            return
+
+        stdout, stderr, code = await _run_agent_browser(
+            "open about:blank",
+            session=SESSION_NAME,
+            profile=BROWSER_PROFILE_DIR,
+            timeout=30,
+        )
+        if code == 0:
+            _browser_ready = True
+            logger.info("[gull] Browser daemon started (profile applied)")
+        else:
+            logger.warning(
+                "[gull] Browser pre-warm failed (will fall back to per-command profile): exit=%s stderr=%s",
+                code,
+                (stderr or "").strip(),
+            )
 
 
 class ExecRequest(BaseModel):
@@ -267,22 +313,17 @@ async def lifespan(app: FastAPI):
     print(f"[gull] Starting Gull v{GULL_VERSION}, session={SESSION_NAME}")
     print(f"[gull] Browser profile dir: {BROWSER_PROFILE_DIR}")
 
-    # Pre-warm browser: trigger Chromium startup via `open about:blank`.
-    # Similar to Ship pre-warming Jupyter Kernel to avoid first-request latency.
+    # Pre-warm browser: start agent-browser daemon + Chromium via `open about:blank`.
     # Failure does NOT block service startup (graceful degradation).
     try:
         print("[gull] Pre-warming browser (open about:blank)...")
-        stdout, stderr, code = await _run_agent_browser(
-            "open about:blank",
-            session=SESSION_NAME,
-            profile=BROWSER_PROFILE_DIR,
-            timeout=30,
-        )
-        if code == 0:
-            _browser_ready = True
+        await _ensure_browser_ready()
+        if _browser_ready:
             print("[gull] Browser pre-warmed successfully")
         else:
-            print(f"[gull] Browser pre-warm returned exit_code={code}: {stderr}")
+            print(
+                "[gull] Browser pre-warm did not complete (will fall back to per-command --profile)"
+            )
     except Exception as e:
         # Pre-warm failure is not fatal; first user command will trigger startup
         print(f"[gull] Failed to pre-warm browser: {e}")
@@ -294,7 +335,7 @@ async def lifespan(app: FastAPI):
     await _run_agent_browser(
         "close",
         session=SESSION_NAME,
-        profile=BROWSER_PROFILE_DIR,
+        profile=None,
         timeout=5,
     )
     _browser_ready = False
@@ -322,10 +363,12 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
         {"cmd": "fill @e2 'hello world'"}
         {"cmd": "screenshot /workspace/page.png"}
     """
+    # If lifespan pre-warm succeeded, omit --profile to avoid agent-browser daemon warnings.
+    profile = None if _browser_ready else BROWSER_PROFILE_DIR
     stdout, stderr, exit_code = await _run_agent_browser(
         request.cmd,
         session=SESSION_NAME,
-        profile=BROWSER_PROFILE_DIR,
+        profile=profile,
         timeout=request.timeout,
     )
 
@@ -366,10 +409,12 @@ async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
             break
 
         step_start = time.perf_counter()
+        # If lifespan pre-warm succeeded, omit --profile to avoid agent-browser daemon warnings.
+        profile = None if _browser_ready else BROWSER_PROFILE_DIR
         stdout, stderr, exit_code = await _run_agent_browser(
             cmd,
             session=SESSION_NAME,
-            profile=BROWSER_PROFILE_DIR,
+            profile=profile,
             timeout=remaining_timeout,
         )
         step_duration_ms = int((time.perf_counter() - step_start) * 1000)
@@ -435,7 +480,7 @@ async def health() -> HealthResponse:
         "session list",
         # Do NOT bind to a session here; we want to list all active sessions.
         session=None,
-        profile=BROWSER_PROFILE_DIR,
+        profile=None,
         timeout=5,
     )
 
