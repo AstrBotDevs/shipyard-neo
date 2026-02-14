@@ -1,9 +1,9 @@
 """Unit tests for Gull command runner.
 
-Focuses on the internal `_run_agent_browser()` helper:
-- Injects `--session` and `--profile`
-- Uses `shlex.split()` so quoted args are preserved
-- Properly returns stdout/stderr/exit_code
+Focuses on the internal runner helpers and API functions:
+- `_run_agent_browser()` argv construction, quoting, timeouts, and error paths
+- `_ensure_browser_ready()` probe/prewarm behavior and concurrency lock
+- `exec_command()` and `exec_batch()` policy around profile injection
 
 These tests do NOT require agent-browser to be installed.
 """
@@ -22,7 +22,7 @@ import app.main as gull_main
 class _FakeProcess:
     stdout_bytes: bytes
     stderr_bytes: bytes
-    returncode: int = 0
+    returncode: int | None = 0
 
     async def communicate(self) -> tuple[bytes, bytes]:
         return self.stdout_bytes, self.stderr_bytes
@@ -31,7 +31,7 @@ class _FakeProcess:
         # emulate subprocess API
         self.returncode = -9
 
-    async def wait(self) -> int:
+    async def wait(self) -> int | None:
         return self.returncode
 
 
@@ -123,6 +123,225 @@ async def test_run_agent_browser_timeout_kills_process(monkeypatch: pytest.Monke
     assert stdout == ""
     assert "timed out" in stderr
     assert code == -1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_browser_returns_minus_one_when_agent_browser_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
+
+    stdout, stderr, code = await gull_main._run_agent_browser(
+        "open https://example.com",
+        session="s",
+        profile="/p",
+        timeout=1,
+    )
+
+    assert stdout == ""
+    assert "agent-browser not found" in stderr
+    assert code == -1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_browser_returns_minus_one_on_generic_exception(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
+
+    stdout, stderr, code = await gull_main._run_agent_browser(
+        "open https://example.com",
+        session="s",
+        profile="/p",
+        timeout=1,
+    )
+
+    assert stdout == ""
+    assert "Failed to execute command" in stderr
+    assert "boom" in stderr
+    assert code == -1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_browser_returncode_none_coerces_to_zero(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return _FakeProcess(b"out", b"", None)
+
+    monkeypatch.setattr(
+        gull_main.asyncio, "create_subprocess_exec", fake_create_subprocess_exec
+    )
+
+    stdout, stderr, code = await gull_main._run_agent_browser(
+        "open about:blank",
+        session="s",
+        profile="/p",
+        timeout=1,
+    )
+
+    assert stdout == "out"
+    assert stderr == ""
+    assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_ensure_browser_ready_probe_success_skips_open(monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    async def fake_run(cmd: str, **_kwargs):
+        calls.append(cmd)
+        if cmd == "session list":
+            return "", "", 0
+        return "", "", 0
+
+    # Reset state
+    monkeypatch.setattr(gull_main, "_browser_ready", False)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+
+    await gull_main._ensure_browser_ready()
+
+    assert gull_main._browser_ready is True
+    assert calls == ["session list"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_browser_ready_probe_fail_then_open_success_sets_ready(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[str] = []
+
+    async def fake_run(cmd: str, **_kwargs):
+        calls.append(cmd)
+        if cmd == "session list":
+            return "", "probe failed", 2
+        if cmd == "open about:blank":
+            return "ok", "", 0
+        return "", "", 0
+
+    monkeypatch.setattr(gull_main, "_browser_ready", False)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+
+    await gull_main._ensure_browser_ready()
+
+    assert gull_main._browser_ready is True
+    assert calls == ["session list", "open about:blank"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_browser_ready_is_idempotent_under_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Concurrent calls should not trigger multiple probes/prewarms."""
+    calls: list[str] = []
+
+    async def fake_run(cmd: str, **_kwargs):
+        # Make the race window larger so we'd see duplicated calls if lock is broken.
+        await asyncio.sleep(0.01)
+        calls.append(cmd)
+        # Probe succeeds.
+        if cmd == "session list":
+            return "", "", 0
+        return "", "", 0
+
+    monkeypatch.setattr(gull_main, "_browser_ready", False)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+
+    await asyncio.gather(*[gull_main._ensure_browser_ready() for _ in range(20)])
+
+    assert gull_main._browser_ready is True
+    assert calls.count("session list") == 1
+    assert calls.count("open about:blank") == 0
+
+
+@pytest.mark.asyncio
+async def test_exec_command_omits_profile_when_browser_ready_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    async def fake_ensure_ready() -> None:
+        return None
+
+    async def fake_run(_cmd: str, **kwargs):
+        captured.update(kwargs)
+        return "", "", 0
+
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+    monkeypatch.setattr(gull_main, "_browser_ready", True)
+
+    await gull_main.exec_command(gull_main.ExecRequest(cmd="open about:blank", timeout=5))
+
+    assert captured["profile"] is None
+
+
+@pytest.mark.asyncio
+async def test_exec_command_injects_profile_when_browser_ready_false(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    async def fake_ensure_ready() -> None:
+        return None
+
+    async def fake_run(_cmd: str, **kwargs):
+        captured.update(kwargs)
+        return "", "", 0
+
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+    monkeypatch.setattr(gull_main, "_browser_ready", False)
+    monkeypatch.setattr(gull_main, "BROWSER_PROFILE_DIR", "/workspace/.browser/profile")
+
+    await gull_main.exec_command(gull_main.ExecRequest(cmd="open about:blank", timeout=5))
+
+    assert captured["profile"] == "/workspace/.browser/profile"
+
+
+@pytest.mark.asyncio
+async def test_exec_batch_does_not_execute_step_when_budget_exactly_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    executed: list[str] = []
+
+    async def fake_run(cmd: str, **_kwargs):
+        executed.append(cmd)
+        return "ok", "", 0
+
+    async def fake_ensure_ready() -> None:
+        return None
+
+    # perf_counter() call order in exec_batch():
+    # 1) batch_start
+    # 2) elapsed check (step 0)
+    # 3) step_start (step 0)
+    # 4) step_end (step 0)
+    # 5) elapsed check (step 1) -> remaining becomes 0 -> break
+    # 6) total_duration_ms at the end
+    perf_values = iter([0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
+    monkeypatch.setattr(gull_main.time, "perf_counter", lambda: next(perf_values))
+    monkeypatch.setattr(gull_main, "_ensure_browser_ready", fake_ensure_ready)
+    monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
+
+    response = await gull_main.exec_batch(
+        gull_main.BatchExecRequest(commands=["open about:blank", "get title"], timeout=2)
+    )
+
+    assert executed == ["open about:blank"]
+    assert response.total_steps == 2
+    assert response.completed_steps == 1
+    assert response.success is False
 
 
 @pytest.mark.asyncio

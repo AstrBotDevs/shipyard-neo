@@ -50,6 +50,24 @@ description: "A quoted description"
         assert result["description"] == "A quoted description"
 
 
+class TestParseFrontmatterDirtyInputs:
+    def test_crlf_line_endings(self):
+        text = "---\r\nname: a\r\ndescription: b\r\n---\r\n# Title\r\n"
+        result = _parse_frontmatter(text)
+        assert result["name"] == "a"
+        assert result["description"] == "b"
+
+    def test_leading_blank_lines(self):
+        text = "\n\n---\nname: a\ndescription: b\n---\n"
+        result = _parse_frontmatter(text)
+        assert result["name"] == "a"
+
+    def test_utf8_bom(self):
+        text = "\ufeff---\nname: a\ndescription: b\n---\n"
+        result = _parse_frontmatter(text)
+        assert result["name"] == "a"
+
+
 class TestScanBuiltInSkills:
     """Tests for scanning /app/skills/ directories."""
 
