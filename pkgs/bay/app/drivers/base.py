@@ -103,7 +103,7 @@ class Driver(ABC):
     - profile_id
 
     Note:
-    - `runtime_port` 是 runtime 容器内暴露 HTTP API 的端口（例如 Ship 默认 8000）。
+    - `runtime_port` 是 runtime 容器内暴露 HTTP API 的端口（例如 Ship 默认 8123）。
       不应在 Driver 中硬编码，应该由 Profile/配置传入。
     """
 

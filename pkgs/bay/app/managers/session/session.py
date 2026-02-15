@@ -191,7 +191,7 @@ class SessionManager:
         if session.observed_state != SessionStatus.RUNNING:
             container_id = session.container_id
             primary = profile.get_primary_container()
-            runtime_port = primary.runtime_port if primary else 8000
+            runtime_port = primary.runtime_port if primary else 8123
             try:
                 endpoint = await self._driver.start(
                     container_id,
@@ -748,7 +748,7 @@ class SessionManager:
             return session
 
         primary = profile.get_primary_container()
-        runtime_port = primary.runtime_port if primary else 8000
+        runtime_port = primary.runtime_port if primary else 8123
 
         try:
             info = await self._driver.status(

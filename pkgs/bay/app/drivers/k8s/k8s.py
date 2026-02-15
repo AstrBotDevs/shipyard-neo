@@ -183,7 +183,7 @@ class K8sDriver(Driver):
         api_client = await self._get_api_client()
         v1 = client.CoreV1Api(api_client)
 
-        runtime_port = int(profile.runtime_port or 8000)
+        runtime_port = int(profile.runtime_port or 8123)
         pod_name = f"bay-session-{session.id}"
 
         # Build labels
