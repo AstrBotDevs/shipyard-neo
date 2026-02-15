@@ -10,7 +10,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 8114
 
 database:
   # SQLite for single-instance deployment.
@@ -106,7 +106,7 @@ profiles:
       - name: browser
         image: "ghcr.io/astrbotdevs/shipyard-neo-gull:latest"
         runtime_type: gull
-        runtime_port: 8080
+        runtime_port: 8115
         resources:
           cpus: 1.0
           memory: "2g"

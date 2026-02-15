@@ -12,7 +12,7 @@ Bay + Ship + Gull 的 Docker Compose 自包含生产部署方案。
 │  │  bay-network (bridge)                           │  │
 │  │                                                  │  │
 │  │  ┌──────────┐                                   │  │
-│  │  │  Bay     │ :8000 ──→ Host :8000              │  │
+│  │  │  Bay     │ :8114 ──→ Host :8114              │  │
 │  │  │ (API GW) │                                   │  │
 │  │  └────┬─────┘                                   │  │
 │  │       │  container_network 直连                  │  │
@@ -43,7 +43,7 @@ vi config.yaml
 docker compose up -d
 
 # 3. 验证健康
-curl http://localhost:8000/health
+curl http://localhost:8114/health
 
 # 4. 查看日志
 docker compose logs -f bay
@@ -76,10 +76,10 @@ docker compose logs -f bay
 
 ```bash
 # 基础信息
-curl -H "Authorization: Bearer <your-api-key>" http://localhost:8000/v1/profiles
+curl -H "Authorization: Bearer <your-api-key>" http://localhost:8114/v1/profiles
 
 # 包含 description 和容器拓扑
-curl -H "Authorization: Bearer <your-api-key>" "http://localhost:8000/v1/profiles?detail=true"
+curl -H "Authorization: Bearer <your-api-key>" "http://localhost:8114/v1/profiles?detail=true"
 ```
 
 ### upload / download
