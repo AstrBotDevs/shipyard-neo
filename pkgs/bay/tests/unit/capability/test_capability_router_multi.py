@@ -42,7 +42,7 @@ def test_get_adapter_routes_to_container_by_capability(mock_sandbox_mgr):
             {
                 "name": "gull",
                 "container_id": "c-gull",
-                "endpoint": "http://gull:8080",
+                "endpoint": "http://gull:8115",
                 "status": "running",
                 "runtime_type": "gull",
                 "capabilities": ["browser"],
@@ -77,7 +77,7 @@ def test_get_adapter_falls_back_to_primary_when_no_capability(mock_sandbox_mgr):
             {
                 "name": "gull",
                 "container_id": "c-gull",
-                "endpoint": "http://gull:8080",
+                "endpoint": "http://gull:8115",
                 "status": "running",
                 "runtime_type": "gull",
                 "capabilities": ["browser"],
@@ -110,7 +110,7 @@ def test_get_adapter_missing_capability_raises_with_available(mock_sandbox_mgr):
             {
                 "name": "gull",
                 "container_id": "c-gull",
-                "endpoint": "http://gull:8080",
+                "endpoint": "http://gull:8115",
                 "status": "running",
                 "runtime_type": "gull",
                 "capabilities": ["browser"],

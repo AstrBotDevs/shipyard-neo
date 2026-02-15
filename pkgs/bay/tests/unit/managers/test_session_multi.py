@@ -37,7 +37,7 @@ def _multi_profile() -> ProfileConfig:
                 name="gull",
                 image="gull:latest",
                 runtime_type="gull",
-                runtime_port=8080,
+                runtime_port=8115,
                 capabilities=["browser"],
             ),
         ],
@@ -339,7 +339,7 @@ class TestSessionContainersField:
                 {
                     "name": "gull",
                     "container_id": "c2",
-                    "endpoint": "http://gull:8080",
+                    "endpoint": "http://gull:8115",
                     "capabilities": ["browser"],
                 },
             ],
@@ -363,10 +363,10 @@ class TestSessionContainersField:
             sandbox_id="sbx-1",
             containers=[
                 {"name": "ship", "container_id": "c1", "endpoint": "http://ship:8123"},
-                {"name": "gull", "container_id": "c2", "endpoint": "http://gull:8080"},
+                {"name": "gull", "container_id": "c2", "endpoint": "http://gull:8115"},
             ],
         )
 
         assert session.get_container_endpoint("ship") == "http://ship:8123"
-        assert session.get_container_endpoint("gull") == "http://gull:8080"
+        assert session.get_container_endpoint("gull") == "http://gull:8115"
         assert session.get_container_endpoint("unknown") is None

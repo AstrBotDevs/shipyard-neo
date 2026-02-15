@@ -142,7 +142,7 @@ class TestMultiContainerProfile:
                     name="browser",
                     image="browser-runtime:latest",
                     runtime_type="browser",
-                    runtime_port=8080,
+                    runtime_port=8115,
                     capabilities=["browser", "screenshot", "filesystem"],
                 ),
             ],
@@ -367,7 +367,7 @@ class TestContainerSpec:
             name="browser",
             image="browser-runtime:latest",
             runtime_type="browser",
-            runtime_port=8080,
+            runtime_port=8115,
             resources=ResourceSpec(cpus=2.0, memory="2g"),
             capabilities=["browser", "screenshot"],
             primary_for=["browser"],
@@ -376,7 +376,7 @@ class TestContainerSpec:
         )
         assert spec.name == "browser"
         assert spec.runtime_type == "browser"
-        assert spec.runtime_port == 8080
+        assert spec.runtime_port == 8115
         assert spec.resources.memory == "2g"
         assert spec.capabilities == ["browser", "screenshot"]
         assert spec.primary_for == ["browser"]
@@ -422,7 +422,7 @@ class TestSessionModelMultiContainer:
             sandbox_id="sbx-test",
             containers=[
                 {"name": "ship", "container_id": "c1", "endpoint": "http://ship:8123"},
-                {"name": "browser", "container_id": "c2", "endpoint": "http://browser:8080"},
+                {"name": "browser", "container_id": "c2", "endpoint": "http://browser:8115"},
             ],
         )
         assert session.is_multi_container is True
@@ -468,7 +468,7 @@ class TestSessionModelMultiContainer:
                 {
                     "name": "browser",
                     "container_id": "c2",
-                    "endpoint": "http://browser:8080",
+                    "endpoint": "http://browser:8115",
                     "capabilities": ["browser", "screenshot"],
                 },
             ],
@@ -493,11 +493,11 @@ class TestSessionModelMultiContainer:
             sandbox_id="sbx-test",
             containers=[
                 {"name": "ship", "endpoint": "http://ship:8123"},
-                {"name": "browser", "endpoint": "http://browser:8080"},
+                {"name": "browser", "endpoint": "http://browser:8115"},
             ],
         )
         assert session.get_container_endpoint("ship") == "http://ship:8123"
-        assert session.get_container_endpoint("browser") == "http://browser:8080"
+        assert session.get_container_endpoint("browser") == "http://browser:8115"
         assert session.get_container_endpoint("unknown") is None
 
     def test_degraded_status_exists(self):
