@@ -17,12 +17,12 @@ spec:
     app.kubernetes.io/name: bay
   ports:
     - name: http
-      port: 8000
-      targetPort: 8000
+      port: 8114
+      targetPort: 8114
       protocol: TCP
   # 如需固定 NodePort（改为 type: NodePort 后取消注释）：
   # - name: http
-  #   port: 8000
-  #   targetPort: 8000
+  #   port: 8114
+  #   targetPort: 8114
   #   nodePort: 30800
   #   protocol: TCP

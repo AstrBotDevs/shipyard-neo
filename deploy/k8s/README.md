@@ -12,7 +12,7 @@ Bay + Ship + Gull 的 Kubernetes 生产部署方案。
 │  ┌──────────────────────────────────────────────────────┐ │
 │  │                                                      │ │
 │  │  ┌──────────────┐                                    │ │
-│  │  │  Bay         │  Service (LoadBalancer :8000)       │ │
+│  │  │  Bay         │  Service (LoadBalancer :8114)       │ │
 │  │  │  Deployment  │  ←── 外部访问入口                   │ │
 │  │  │  (1 replica) │                                    │ │
 │  │  └──────┬───────┘                                    │ │
@@ -67,11 +67,11 @@ kubectl -n bay get svc
 
 # 4. 验证健康
 # LoadBalancer 分配 IP 后：
-curl http://<EXTERNAL-IP>:8000/health
+curl http://<EXTERNAL-IP>:8114/health
 
 # 或通过 port-forward：
-kubectl -n bay port-forward svc/bay 8000:8000
-curl http://localhost:8000/health
+kubectl -n bay port-forward svc/bay 8114:8114
+curl http://localhost:8114/health
 ```
 
 ## 文件说明
@@ -83,7 +83,7 @@ curl http://localhost:8000/health
 | `02-configmap.yaml` | Bay 配置文件（profiles、driver、GC 等） |
 | `03-pvc.yaml` | Bay 数据持久化（SQLite），默认 StorageClass，可选指定 |
 | `04-deployment.yaml` | Bay Deployment（1 副本，含健康检查） |
-| `05-service.yaml` | LoadBalancer Service（暴露 :8000） |
+| `05-service.yaml` | LoadBalancer Service（暴露 :8114） |
 
 ## RBAC 权限
 
@@ -141,8 +141,8 @@ spec:
   type: NodePort
   ports:
     - name: http
-      port: 8000
-      targetPort: 8000
+      port: 8114
+      targetPort: 8114
       nodePort: 30800  # 固定端口
 ```
 
@@ -166,7 +166,7 @@ kubectl -n bay get pvc -l bay.managed=true
 
 ```bash
 curl -X POST -H "Authorization: Bearer <api-key>" \
-  http://<bay-endpoint>:8000/v1/admin/gc/run
+  http://<bay-endpoint>:8114/v1/admin/gc/run
 ```
 
 ### 升级
