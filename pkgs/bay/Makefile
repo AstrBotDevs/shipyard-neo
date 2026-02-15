@@ -2,7 +2,7 @@
 
 # Development
 dev:
-	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8114
 
 # Testing
 test:
@@ -36,7 +36,7 @@ docker-build:
 
 docker-run:
 	docker run --rm -it \
-		-p 8000:8000 \
+		-p 8114:8114 \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		bay:latest
 
