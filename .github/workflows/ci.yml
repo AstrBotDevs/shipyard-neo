@@ -166,7 +166,8 @@ jobs:
             port: 8001
 
           security:
-            allow_anonymous: true
+            api_key: "e2e-test-api-key"
+            allow_anonymous: false
 
           driver:
             type: docker
@@ -222,6 +223,7 @@ jobs:
         working-directory: pkgs/bay
         env:
           E2E_BAY_PORT: "8001"
+          E2E_API_KEY: "e2e-test-api-key"
         run: |
           uv run pytest \
             tests/integration/core/test_browser_skill_e2e.py::test_browser_exec_batch_failure_keeps_response_history_trace_consistent \

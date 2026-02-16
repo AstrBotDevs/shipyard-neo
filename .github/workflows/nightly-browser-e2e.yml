@@ -46,7 +46,8 @@ jobs:
             port: 8001
 
           security:
-            allow_anonymous: true
+            api_key: "e2e-test-api-key"
+            allow_anonymous: false
 
           driver:
             type: docker
@@ -113,6 +114,7 @@ jobs:
         working-directory: pkgs/bay
         env:
           E2E_BAY_PORT: "8001"
+          E2E_API_KEY: "e2e-test-api-key"
         run: uv run pytest tests/integration -v --tb=short
 
       - name: Dump Bay logs on failure
