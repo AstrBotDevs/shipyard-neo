@@ -14,6 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
+import structlog
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,8 @@ from app.managers.sandbox import SandboxManager
 from app.models.sandbox import Sandbox
 from app.services.idempotency import IdempotencyService
 from app.services.skills import SkillLifecycleService
+
+logger = structlog.get_logger()
 
 
 @lru_cache
@@ -82,15 +85,17 @@ async def get_skill_lifecycle_service(
 def authenticate(request: Request) -> str:
     """Authenticate request and return owner.
 
-    Single-tenant mode: Always returns "default" as owner.
-
     Authentication flow:
-    1. If Bearer token provided → validate API key
+    1. If Bearer token provided:
+       a. If security.api_key configured → validate against config (legacy)
+       b. Else if DB key hashes loaded → validate via SHA-256 hash lookup
+       c. Else if allow_anonymous → allow any token
+       d. Otherwise → 401
     2. If no token and allow_anonymous → allow (with optional X-Owner)
     3. Otherwise → 401 Unauthorized
 
     Returns:
-        Owner identifier (currently fixed to "default" for single-tenant)
+        Owner identifier (e.g., "default")
 
     Raises:
         UnauthorizedError: If authentication fails
@@ -103,14 +108,30 @@ def authenticate(request: Request) -> str:
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]
 
-        # Validate API Key (if configured)
+        # 1a. Legacy: Validate against config api_key
         if security.api_key:
             if token == security.api_key:
+                logger.debug("auth.success", source="config")
                 return "default"  # Single-tenant, fixed owner
             raise UnauthorizedError("Invalid API key")
 
-        # No API key configured, accept any token in anonymous mode
+        # 1b. DB key hash lookup (loaded at startup into app.state)
+        api_key_hashes: dict[str, str] = getattr(
+            request.app.state, "api_key_hashes", {}
+        )
+        if api_key_hashes:
+            from app.services.api_key import ApiKeyService
+
+            token_hash = ApiKeyService.hash_key(token)
+            owner = api_key_hashes.get(token_hash)
+            if owner:
+                logger.debug("auth.success", source="db", owner=owner)
+                return owner
+            raise UnauthorizedError("Invalid API key")
+
+        # 1c. No API key configured anywhere, accept any token in anonymous mode
         if security.allow_anonymous:
+            logger.debug("auth.success", source="anonymous")
             return "default"
         raise UnauthorizedError("Authentication required")
 
