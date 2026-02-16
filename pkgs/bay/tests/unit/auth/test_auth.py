@@ -20,6 +20,8 @@ def create_mock_request(headers: dict[str, str] | None = None) -> Request:
     """Create a mock FastAPI Request with given headers."""
     mock_request = MagicMock(spec=Request)
     mock_request.headers = headers or {}
+    # Ensure app.state.api_key_hashes is empty so DB auth path isn't triggered
+    mock_request.app.state.api_key_hashes = {}
     return mock_request
 
 
