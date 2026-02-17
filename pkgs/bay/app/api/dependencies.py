@@ -11,6 +11,7 @@ Provides dependency injection for:
 
 from __future__ import annotations
 
+import hmac
 from functools import lru_cache
 from typing import Annotated
 
@@ -110,7 +111,7 @@ def authenticate(request: Request) -> str:
 
         # 1a. Legacy: Validate against config api_key
         if security.api_key:
-            if token == security.api_key:
+            if hmac.compare_digest(token, security.api_key):
                 logger.debug("auth.success", source="config")
                 return "default"  # Single-tenant, fixed owner
             raise UnauthorizedError("Invalid API key")
@@ -123,7 +124,11 @@ def authenticate(request: Request) -> str:
             from app.services.api_key import ApiKeyService
 
             token_hash = ApiKeyService.hash_key(token)
-            owner = api_key_hashes.get(token_hash)
+            owner = None
+            for stored_hash, stored_owner in api_key_hashes.items():
+                if hmac.compare_digest(token_hash, stored_hash):
+                    owner = stored_owner
+                    break
             if owner:
                 logger.debug("auth.success", source="db", owner=owner)
                 return owner
