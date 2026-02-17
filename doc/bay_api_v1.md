@@ -47,15 +47,15 @@ Bay API v1 是 Shipyard Neo 的控制面 REST API，基于 FastAPI 构建。它�
 ```
 请求进入
   ├─ 携带 Authorization: Bearer <token>
-  │   ├─ 配置了 api_key → token == api_key ? 通过 : 401
-  │   └─ 未配置 api_key + allow_anonymous → 通过
+  │   ├─ DB 中有 key hash → hash 匹配 ? 通过(返回 owner) : 401
+  │   └─ DB 中无 key hash + allow_anonymous → 通过
   │
   └─ 未携带 token
       ├─ allow_anonymous = true → 通过（可选 X-Owner header）
       └─ allow_anonymous = false → 401
 ```
 
-- **单租户模式**: 当前所有请求的 owner 固定返回 `"default"`
+- **API Key 来源**: Bay 首次启动时自动生成 `sk-bay-...` 格式的 key，hash 存入 DB，明文写入 `credentials.json`。也可通过 `BAY_API_KEY` 环境变量注入固定 key。
 - **开发模式**: `allow_anonymous: true` 时，支持通过 `X-Owner` header 指定 owner（用于测试）
 
 ### 幂等性支持

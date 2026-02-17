@@ -9,6 +9,12 @@
 #   3. curl http://localhost:8114/health
 #
 # See README.md for full documentation.
+#
+# API Key Auto-Provisioning:
+#   On first start, Bay auto-generates an API key (sk-bay-...) and writes
+#   {BAY_DATA_DIR}/credentials.json. Companion services (e.g. AstrBot) can
+#   mount the bay-data volume as read-only to discover the key automatically.
+#   To inject a specific key, set BAY_API_KEY in the environment section.
 
 services:
   bay:
@@ -28,10 +34,13 @@ services:
       - bay-cargos:/var/lib/bay/cargos
     environment:
       - BAY_CONFIG_FILE=/app/config.yaml
+      - BAY_DATA_DIR=/app/data
+      # To inject a fixed API key instead of auto-generation:
+      # - BAY_API_KEY=sk-bay-your-key-here
     networks:
       - bay-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8114/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8114/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
