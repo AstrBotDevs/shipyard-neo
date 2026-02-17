@@ -7,6 +7,7 @@ and credentials file output.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -67,7 +68,10 @@ class ApiKeyService:
         Returns:
             True if the key matches
         """
-        return hashlib.sha256(plaintext.encode()).hexdigest() == key_hash
+        return hmac.compare_digest(
+            hashlib.sha256(plaintext.encode()).hexdigest(),
+            key_hash,
+        )
 
     @staticmethod
     async def load_active_key_hashes(db: AsyncSession) -> dict[str, str]:
@@ -163,9 +167,8 @@ class ApiKeyService:
 
         logger.info(
             "api_key.provision.generated",
-            key=plaintext,
             key_prefix=key_prefix,
-            msg="First boot: API key auto-generated. Save this key — it will not be shown again.",
+            msg="First boot: API key auto-generated. See credentials.json for the key.",
         )
 
         # Write credentials file
