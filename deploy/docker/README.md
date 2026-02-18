@@ -49,11 +49,36 @@ curl http://localhost:8114/health
 docker compose logs -f bay
 ```
 
+## AstrBot 联合部署
+
+使用 overlay compose 文件将 AstrBot 加入 Bay 编排：
+
+```bash
+# 启动 Bay + AstrBot
+docker compose -f docker-compose.yaml -f docker-compose.with-astrbot.yaml up -d
+
+# 查看日志
+docker compose -f docker-compose.yaml -f docker-compose.with-astrbot.yaml logs -f
+```
+
+启动后：
+
+1. **打开 Dashboard**: http://localhost:6185（默认用户名密码: astrbot）
+2. **配置 Computer Use**:
+   - 运行环境 → `sandbox`
+   - 沙箱环境驱动器 → `shipyard_neo`
+   - Endpoint → `http://bay:8114`（Docker 内部 DNS）
+   - 访问令牌 → **留空**（自动从 bay-data 卷发现）
+3. **保存** — 应显示 "保存成功~"
+
+> **原理**: AstrBot 以只读方式挂载 Bay 的 `bay-data` 卷，通过 `BAY_DATA_DIR=/bay-data` 环境变量让 `_discover_bay_credentials()` 自动找到 `credentials.json` 中的 API Key。
+
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `docker-compose.yaml` | Compose 编排文件，定义 Bay 服务、网络、存储卷 |
+| `docker-compose.with-astrbot.yaml` | AstrBot overlay，联合部署 Bay + AstrBot |
 | `config.yaml` | Bay 完整配置（profiles、driver、GC 等） |
 | `README.md` | 本文档 |
 

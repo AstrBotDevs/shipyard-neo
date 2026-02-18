@@ -1,0 +1,45 @@
+# AstrBot + Bay Combined Deployment
+#
+# This overlay adds AstrBot alongside the Bay service.
+# AstrBot auto-discovers Bay's API key via the shared bay-data volume.
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.with-astrbot.yaml up -d
+#
+# After startup:
+#   1. Open AstrBot Dashboard: http://localhost:6185
+#   2. Go to AI Config → Computer Use
+#   3. Set runtime = sandbox, booter = shipyard_neo
+#   4. Set endpoint = http://bay:8114 (Docker internal DNS)
+#   5. Leave access token empty (auto-discovered from bay-data volume)
+#   6. Save — you should see "保存成功~" without any warnings
+
+services:
+  astrbot:
+    image: soulter/astrbot:latest
+    container_name: astrbot
+    restart: unless-stopped
+    ports:
+      - "${ASTRBOT_PORT:-6185}:6185"
+    volumes:
+      # AstrBot persistent data
+      - astrbot-data:/AstrBot/data
+      # Bay credentials auto-discovery (read-only)
+      - bay-data:/bay-data:ro
+    environment:
+      # Tell _discover_bay_credentials() where to find credentials.json
+      - BAY_DATA_DIR=/bay-data
+    depends_on:
+      bay:
+        condition: service_healthy
+    networks:
+      - bay-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  astrbot-data:
+    name: astrbot-data
