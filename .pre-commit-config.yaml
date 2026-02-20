@@ -1,0 +1,7 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+      - id: ruff-format
+        description: "Format code with ruff"
+        exclude: ^(.venv/|\.ruff_cache/|__pycache__/|\.pytest_cache/|pkgs/bay/\.venv/|pkgs/bay/\.ruff_cache/|pkgs/bay/__pycache__/|pkgs/bay/\.pytest_cache/)
