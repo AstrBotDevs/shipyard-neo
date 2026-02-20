@@ -345,6 +345,27 @@ class BrowserLearningConfig(BaseModel):
     success_drop_threshold: float = 0.03
     error_rate_multiplier_threshold: float = 2.0
 
+    extraction: "ExtractionConfig" = Field(default_factory=lambda: ExtractionConfig())
+
+
+class LlmExtractionConfig(BaseModel):
+    """LLM-assisted extraction configuration."""
+
+    enabled: bool = False
+    api_base: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "gpt-4.1-mini"
+    timeout_seconds: int = 30
+    max_tokens: int = 4096
+
+
+class ExtractionConfig(BaseModel):
+    """Extraction pipeline configuration."""
+
+    dedup_enabled: bool = True
+    variable_extraction_enabled: bool = True
+    llm: LlmExtractionConfig = Field(default_factory=LlmExtractionConfig)
+
 
 class SecurityConfig(BaseModel):
     """Security configuration."""

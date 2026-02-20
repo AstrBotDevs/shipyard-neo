@@ -380,3 +380,86 @@ async def test_browser_run_skill_works_with_payload_created_by_generic_payload_a
             assert run_data["total_steps"] == 1
             assert run_data["completed_steps"] == 1
             assert run_data["results"][0]["cmd"] == "open about:blank"
+
+
+async def test_browser_run_skill_works_with_payload_containing_variables_field():
+    """Candidate payload with variables metadata should remain runnable end-to-end."""
+    _require_browser_runtime()
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        browser_profile = await _resolve_browser_profile(client)
+        async with create_sandbox(client, profile=browser_profile) as sandbox:
+            sandbox_id = sandbox["id"]
+
+            payload_resp = await client.post(
+                "/v1/skills/payloads",
+                json={
+                    "kind": "candidate_payload",
+                    "payload": {
+                        "commands": ["open about:blank"],
+                        "variables": {
+                            "departure_city": {
+                                "type": "string",
+                                "default_value": "Edinburgh",
+                                "action_index": 0,
+                                "arg_position": 1,
+                            }
+                        },
+                    },
+                },
+                timeout=60.0,
+            )
+            assert payload_resp.status_code == 201, payload_resp.text
+            payload_ref = payload_resp.json()["payload_ref"]
+
+            payload_get_resp = await client.get(
+                f"/v1/skills/payloads/{payload_ref}",
+                timeout=60.0,
+            )
+            assert payload_get_resp.status_code == 200, payload_get_resp.text
+            payload_data = payload_get_resp.json()["payload"]
+            assert payload_data["variables"]["departure_city"]["default_value"] == "Edinburgh"
+
+            source_exec_resp = await client.post(
+                f"/v1/sandboxes/{sandbox_id}/browser/exec",
+                json={"cmd": "open about:blank", "timeout": 60},
+                timeout=120.0,
+            )
+            assert source_exec_resp.status_code == 200, source_exec_resp.text
+            source_execution_id = source_exec_resp.json()["execution_id"]
+
+            candidate_resp = await client.post(
+                "/v1/skills/candidates",
+                json={
+                    "skill_key": "browser-variable-payload",
+                    "source_execution_ids": [source_execution_id],
+                    "payload_ref": payload_ref,
+                },
+                timeout=60.0,
+            )
+            assert candidate_resp.status_code == 201, candidate_resp.text
+            candidate_id = candidate_resp.json()["id"]
+
+            evaluate_resp = await client.post(
+                f"/v1/skills/candidates/{candidate_id}/evaluate",
+                json={"passed": True, "score": 0.92},
+                timeout=60.0,
+            )
+            assert evaluate_resp.status_code == 200, evaluate_resp.text
+
+            promote_resp = await client.post(
+                f"/v1/skills/candidates/{candidate_id}/promote",
+                json={"stage": "canary"},
+                timeout=60.0,
+            )
+            assert promote_resp.status_code == 200, promote_resp.text
+
+            run_resp = await client.post(
+                f"/v1/sandboxes/{sandbox_id}/browser/skills/browser-variable-payload/run",
+                json={"timeout": 60, "stop_on_error": True, "include_trace": False},
+                timeout=120.0,
+            )
+            assert run_resp.status_code == 200, run_resp.text
+            run_data = run_resp.json()
+            assert run_data["execution_id"].startswith("exec-")
+            assert run_data["total_steps"] == 1
+            assert run_data["completed_steps"] == 1

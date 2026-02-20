@@ -123,6 +123,7 @@ class SkillCandidate(SQLModel, table=True):
     skill_key: str = Field(index=True)
     scenario_key: str | None = Field(default=None, index=True)
     payload_ref: str | None = Field(default=None)
+    payload_hash: str | None = Field(default=None, index=True)
     skill_type: SkillType = Field(default=SkillType.CODE, index=True)
     auto_release_eligible: bool = Field(default=False, index=True)
     auto_release_reason: str | None = Field(default=None)

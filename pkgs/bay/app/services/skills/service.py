@@ -421,6 +421,7 @@ class SkillLifecycleService:
         payload_ref: str | None = None,
         created_by: str | None = None,
         skill_type: SkillType = SkillType.CODE,
+        payload_hash: str | None = None,
         auto_release_eligible: bool = False,
         auto_release_reason: str | None = None,
     ) -> SkillCandidate:
@@ -438,6 +439,7 @@ class SkillLifecycleService:
             skill_key=skill_key.strip(),
             scenario_key=scenario_key,
             payload_ref=payload_ref,
+            payload_hash=payload_hash,
             source_execution_ids=self._join_csv(source_execution_ids),
             skill_type=skill_type,
             auto_release_eligible=auto_release_eligible,
@@ -452,6 +454,26 @@ class SkillLifecycleService:
         await self._db.commit()
         await self._db.refresh(candidate)
         return candidate
+
+    async def find_candidate_by_payload_hash(
+        self,
+        *,
+        owner: str,
+        skill_key: str,
+        payload_hash: str | None,
+    ) -> SkillCandidate | None:
+        if payload_hash is None:
+            return None
+        result = await self._db.execute(
+            select(SkillCandidate)
+            .where(
+                SkillCandidate.owner == owner,
+                SkillCandidate.skill_key == skill_key,
+                SkillCandidate.payload_hash == payload_hash,
+            )
+            .limit(1)
+        )
+        return result.scalars().first()
 
     async def update_candidate_auto_release(
         self,
