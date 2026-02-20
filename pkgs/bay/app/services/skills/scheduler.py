@@ -204,8 +204,7 @@ class BrowserLearningProcessor:
                 promoted_by="system:auto",
                 release_mode=SkillReleaseMode.AUTO,
                 auto_promoted_from=active.id if active else None,
-                health_window_end_at=utcnow()
-                + timedelta(hours=self._config.canary_window_hours),
+                health_window_end_at=utcnow() + timedelta(hours=self._config.canary_window_hours),
             )
             result.promoted_canary += 1
             await self._svc.update_candidate_auto_release(

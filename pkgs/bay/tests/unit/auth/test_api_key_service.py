@@ -80,9 +80,7 @@ class TestWriteCredentialsFile:
 
     def test_writes_json(self, tmp_path: Path):
         """Credentials file contains expected JSON fields."""
-        ApiKeyService.write_credentials_file(
-            tmp_path, "sk-bay-test", "http://localhost:8114"
-        )
+        ApiKeyService.write_credentials_file(tmp_path, "sk-bay-test", "http://localhost:8114")
 
         cred_path = tmp_path / "credentials.json"
         assert cred_path.exists()
@@ -94,9 +92,7 @@ class TestWriteCredentialsFile:
 
     def test_file_permissions(self, tmp_path: Path):
         """Credentials file has 0600 permissions."""
-        ApiKeyService.write_credentials_file(
-            tmp_path, "sk-bay-test", "http://localhost:8114"
-        )
+        ApiKeyService.write_credentials_file(tmp_path, "sk-bay-test", "http://localhost:8114")
 
         cred_path = tmp_path / "credentials.json"
         mode = oct(cred_path.stat().st_mode)[-3:]
@@ -105,9 +101,7 @@ class TestWriteCredentialsFile:
     def test_creates_parent_dirs(self, tmp_path: Path):
         """Creates parent directories if they don't exist."""
         nested = tmp_path / "sub" / "dir"
-        ApiKeyService.write_credentials_file(
-            nested, "sk-bay-test", "http://localhost:8114"
-        )
+        ApiKeyService.write_credentials_file(nested, "sk-bay-test", "http://localhost:8114")
 
         assert (nested / "credentials.json").exists()
 
@@ -262,9 +256,7 @@ class TestAuthenticateWithDbKey:
         from app.config import SecurityConfig, Settings
 
         settings = MagicMock(spec=Settings)
-        settings.security = SecurityConfig(
-            allow_anonymous=allow_anonymous
-        )
+        settings.security = SecurityConfig(allow_anonymous=allow_anonymous)
         return settings
 
     def test_db_key_matches(self):
@@ -332,5 +324,3 @@ class TestAuthenticateWithDbKey:
         with patch("app.api.dependencies.get_settings", return_value=settings):
             with pytest.raises(UnauthorizedError):
                 authenticate(request)
-
-

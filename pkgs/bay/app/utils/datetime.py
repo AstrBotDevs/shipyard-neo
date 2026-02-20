@@ -16,4 +16,3 @@ def utcnow() -> datetime:
     storage/serialization behavior.
     """
     return datetime.now(UTC).replace(tzinfo=None)
-

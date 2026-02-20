@@ -45,8 +45,6 @@ def get_version() -> str:
         return "unknown"
 
 
-
-
 # Configuration from environment
 SESSION_NAME = os.environ.get("SANDBOX_ID", os.environ.get("BAY_SANDBOX_ID", "default"))
 WORKSPACE_PATH = os.environ.get("BAY_WORKSPACE_PATH", "/workspace")

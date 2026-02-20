@@ -61,9 +61,7 @@ class TestHealthEndpointVersion:
     async def test_health_returns_version(self):
         app = main_module.create_app()
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             resp = await client.get("/health")
             assert resp.status_code == 200
             data = resp.json()
@@ -75,9 +73,7 @@ class TestHealthEndpointVersion:
         pyproject_version = _read_pyproject_version()
         app = main_module.create_app()
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             resp = await client.get("/health")
             data = resp.json()
             assert data["version"] == pyproject_version

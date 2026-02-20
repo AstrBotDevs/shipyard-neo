@@ -25,8 +25,7 @@ async def handle_list_profiles(arguments: dict[str, Any]) -> list[TextContent]:
         caps = ", ".join(p.capabilities) if p.capabilities else "none"
         desc = f" — {p.description}" if p.description else ""
         lines.append(
-            f"- **{p.id}**{desc}: capabilities=[{caps}], "
-            f"idle_timeout={p.idle_timeout}s"
+            f"- **{p.id}**{desc}: capabilities=[{caps}], idle_timeout={p.idle_timeout}s"
         )
         if p.containers:
             for c in p.containers:

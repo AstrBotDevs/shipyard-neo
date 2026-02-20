@@ -55,13 +55,17 @@ class TestHealthEndpointVersion:
     """Verify /health response includes version."""
 
     @pytest.mark.asyncio
-    async def test_health_unhealthy_includes_version(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_health_unhealthy_includes_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         monkeypatch.setattr(gull_main.shutil, "which", lambda _name: None)
         response = await gull_main.health()
         assert response.version == gull_main.GULL_VERSION
 
     @pytest.mark.asyncio
-    async def test_health_healthy_includes_version(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_health_healthy_includes_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         monkeypatch.setattr(
             gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser"
         )
@@ -75,7 +79,9 @@ class TestHealthEndpointVersion:
         assert response.version == gull_main.GULL_VERSION
 
     @pytest.mark.asyncio
-    async def test_health_degraded_includes_version(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_health_degraded_includes_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         monkeypatch.setattr(
             gull_main.shutil, "which", lambda _name: "/usr/bin/agent-browser"
         )

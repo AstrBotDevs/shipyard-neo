@@ -36,10 +36,7 @@ async def handle_create_skill_payload(
     return [
         TextContent(
             type="text",
-            text=(
-                f"Created skill payload {result.payload_ref}\n"
-                f"kind: {result.kind}"
-            ),
+            text=(f"Created skill payload {result.payload_ref}\nkind: {result.kind}"),
         )
     ]
 

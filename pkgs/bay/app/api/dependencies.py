@@ -109,9 +109,7 @@ def authenticate(request: Request) -> str:
         token = auth_header[7:]
 
         # 1a. DB key hash lookup (loaded at startup into app.state)
-        api_key_hashes: dict[str, str] = getattr(
-            request.app.state, "api_key_hashes", {}
-        )
+        api_key_hashes: dict[str, str] = getattr(request.app.state, "api_key_hashes", {})
         if api_key_hashes:
             from app.services.api_key import ApiKeyService
 

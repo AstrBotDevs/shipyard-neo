@@ -224,9 +224,7 @@ class TestQuerySingleContainer:
         mock_adapter.get_meta.return_value = FakeRuntimeMeta(version="0.1.2")
         mock_adapter.health.return_value = True
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", return_value=mock_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", return_value=mock_adapter):
             result = await _query_single_container(container)
 
         assert result.name == "ship"
@@ -280,9 +278,7 @@ class TestQuerySingleContainer:
         mock_adapter.get_meta.side_effect = Exception("connection refused")
         mock_adapter.health.return_value = True
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", return_value=mock_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", return_value=mock_adapter):
             result = await _query_single_container(container)
 
         assert result.version is None
@@ -303,9 +299,7 @@ class TestQuerySingleContainer:
         mock_adapter.get_meta.return_value = FakeRuntimeMeta(version="0.1.2")
         mock_adapter.health.side_effect = Exception("timeout")
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", return_value=mock_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", return_value=mock_adapter):
             result = await _query_single_container(container)
 
         assert result.version == "0.1.2"
@@ -326,9 +320,7 @@ class TestQuerySingleContainer:
         mock_adapter.get_meta.side_effect = Exception("down")
         mock_adapter.health.side_effect = Exception("down")
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", return_value=mock_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", return_value=mock_adapter):
             result = await _query_single_container(container)
 
         assert result.name == "ship"
@@ -376,9 +368,7 @@ class TestQueryContainersStatus:
         mock_adapter.get_meta.return_value = FakeRuntimeMeta(version="0.1.2")
         mock_adapter.health.return_value = True
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", return_value=mock_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", return_value=mock_adapter):
             result = await _query_containers_status(session)
 
         assert result is not None
@@ -420,9 +410,7 @@ class TestQueryContainersStatus:
             adapter.health.return_value = True
             return adapter
 
-        with patch(
-            "app.api.v1.sandboxes._make_adapter", side_effect=make_adapter
-        ):
+        with patch("app.api.v1.sandboxes._make_adapter", side_effect=make_adapter):
             result = await _query_containers_status(session)
 
         assert result is not None
@@ -457,11 +445,12 @@ class TestQueryContainersStatus:
                 healthy=True,
             )
 
-        with patch(
-            "app.api.v1.sandboxes._query_single_container",
-            side_effect=slow_query,
-        ), patch(
-            "app.api.v1.sandboxes._CONTAINER_QUERY_TIMEOUT", 0.01
+        with (
+            patch(
+                "app.api.v1.sandboxes._query_single_container",
+                side_effect=slow_query,
+            ),
+            patch("app.api.v1.sandboxes._CONTAINER_QUERY_TIMEOUT", 0.01),
         ):
             result = await _query_containers_status(session)
 

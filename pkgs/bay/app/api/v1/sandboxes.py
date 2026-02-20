@@ -171,9 +171,7 @@ async def _query_single_container(
             meta_task = asyncio.create_task(adapter.get_meta())
             health_task = asyncio.create_task(adapter.health())
 
-            results = await asyncio.gather(
-                meta_task, health_task, return_exceptions=True
-            )
+            results = await asyncio.gather(meta_task, health_task, return_exceptions=True)
 
             if not isinstance(results[0], BaseException):
                 version = results[0].version

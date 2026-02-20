@@ -171,9 +171,7 @@ async def handle_upload_file(arguments: dict[str, Any]) -> list[TextContent]:
 async def handle_download_file(arguments: dict[str, Any]) -> list[TextContent]:
     """Download a file from a sandbox workspace to the local filesystem."""
     sandbox_id = validate_sandbox_id(arguments)
-    sandbox_path = validate_relative_path(
-        require_str(arguments, "sandbox_path")
-    )
+    sandbox_path = validate_relative_path(require_str(arguments, "sandbox_path"))
 
     # Determine local destination
     local_path_str = optional_str(arguments, "local_path")

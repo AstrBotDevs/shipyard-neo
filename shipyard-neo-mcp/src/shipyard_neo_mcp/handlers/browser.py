@@ -41,7 +41,9 @@ async def handle_execute_browser(arguments: dict[str, Any]) -> list[TextContent]
             include_trace=include_trace,
         )
 
-    output = truncate_text(result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS)
+    output = truncate_text(
+        result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS
+    )
     status = "successful" if result.success else "failed"
     exit_code = result.exit_code if result.exit_code is not None else "N/A"
     suffix = ""
@@ -114,12 +116,8 @@ async def handle_execute_browser_batch(
             f"(exit={step.exit_code}, {step.duration_ms}ms)"
         )
         if step.stdout.strip():
-            lines.append(
-                f"   stdout: {truncate_text(step.stdout.strip(), limit=500)}"
-            )
+            lines.append(f"   stdout: {truncate_text(step.stdout.strip(), limit=500)}")
         if step.stderr.strip():
-            lines.append(
-                f"   stderr: {truncate_text(step.stderr.strip(), limit=500)}"
-            )
+            lines.append(f"   stderr: {truncate_text(step.stderr.strip(), limit=500)}")
 
     return [TextContent(type="text", text="\n".join(lines))]

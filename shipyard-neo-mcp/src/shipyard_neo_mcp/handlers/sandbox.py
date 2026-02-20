@@ -49,17 +49,11 @@ async def handle_create_sandbox(arguments: dict[str, Any]) -> list[TextContent]:
         for c in sandbox.containers:
             ver = getattr(c, "version", None) or "unknown"
             healthy = getattr(c, "healthy", None)
-            health_str = (
-                "✅" if healthy is True
-                else "❌" if healthy is False
-                else "?"
-            )
+            health_str = "✅" if healthy is True else "❌" if healthy is False else "?"
             rt = getattr(c, "runtime_type", "unknown")
             name = getattr(c, "name", "unknown")
             caps = ", ".join(getattr(c, "capabilities", []))
-            lines.append(
-                f"  - {name} ({rt}) v{ver} {health_str} [{caps}]"
-            )
+            lines.append(f"  - {name} ({rt}) v{ver} {health_str} [{caps}]")
         containers_text = "\n".join(lines) + "\n"
 
     return [

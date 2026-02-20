@@ -27,25 +27,19 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 @pytest.mark.asyncio
 async def test_bay_health_returns_version():
     """Bay's /health endpoint should include a 'version' field."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         resp = await client.get("/health", timeout=DEFAULT_TIMEOUT)
         assert resp.status_code == 200
         data = resp.json()
         assert "version" in data, "/health response missing 'version' field"
         assert data["version"], "version should not be empty"
-        assert SEMVER_RE.match(data["version"]), (
-            f"version '{data['version']}' is not valid semver"
-        )
+        assert SEMVER_RE.match(data["version"]), f"version '{data['version']}' is not valid semver"
 
 
 @pytest.mark.asyncio
 async def test_ship_health_returns_version_via_sandbox():
     """Ship container's /health endpoint (probed via shell exec) should return version."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             sandbox_id = sandbox["id"]
 
@@ -61,18 +55,14 @@ async def test_ship_health_returns_version_via_sandbox():
             )
             assert resp.status_code == 200
             exec_result = resp.json()
-            assert exec_result.get("exit_code") == 0, (
-                f"curl failed: {exec_result.get('error', '')}"
-            )
+            assert exec_result.get("exit_code") == 0, f"curl failed: {exec_result.get('error', '')}"
 
             # Parse the JSON response from Ship's health endpoint
             # Bay shell exec API returns 'output' (not 'stdout')
             import json
 
             health_data = json.loads(exec_result["output"])
-            assert "version" in health_data, (
-                "Ship /health response missing 'version' field"
-            )
+            assert "version" in health_data, "Ship /health response missing 'version' field"
             assert health_data["version"], "Ship version should not be empty"
             assert SEMVER_RE.match(health_data["version"]), (
                 f"Ship version '{health_data['version']}' is not valid semver"
@@ -82,9 +72,7 @@ async def test_ship_health_returns_version_via_sandbox():
 @pytest.mark.asyncio
 async def test_ship_meta_returns_version_via_sandbox():
     """Ship container's /meta endpoint should return runtime version."""
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             sandbox_id = sandbox["id"]
 
@@ -119,9 +107,7 @@ async def test_sandbox_detail_returns_containers_with_version():
     After triggering a session (via shell exec), the sandbox detail response
     should contain a 'containers' list with each container's version.
     """
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             sandbox_id = sandbox["id"]
 
@@ -171,9 +157,7 @@ async def test_sandbox_detail_no_containers_when_idle():
 
     A freshly created sandbox (no session yet) should have containers=null.
     """
-    async with httpx.AsyncClient(
-        base_url=BAY_BASE_URL, headers=AUTH_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             sandbox_id = sandbox["id"]
 
@@ -187,6 +171,4 @@ async def test_sandbox_detail_no_containers_when_idle():
 
             # containers should be null or absent when idle
             containers = data.get("containers")
-            assert containers is None, (
-                "containers should be null when sandbox is idle (no session)"
-            )
+            assert containers is None, "containers should be null when sandbox is idle (no session)"

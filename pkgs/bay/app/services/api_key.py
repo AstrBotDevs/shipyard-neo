@@ -121,9 +121,7 @@ class ApiKeyService:
             key_prefix = configured_key[:_KEY_DISPLAY_LEN]
 
             # Check if already seeded
-            existing = await db.execute(
-                select(ApiKey).where(ApiKey.key_hash == key_hash)
-            )
+            existing = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
             if not existing.scalars().first():
                 api_key = ApiKey(
                     id=str(uuid.uuid4()),

@@ -159,7 +159,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     except ValueError as e:
         return [TextContent(type="text", text=f"**Validation Error:** {e!s}")]
     except TimeoutError:
-        logger.warning("tool_timeout tool=%s timeout=%ds", name, _config_mod.SDK_CALL_TIMEOUT)
+        logger.warning(
+            "tool_timeout tool=%s timeout=%ds", name, _config_mod.SDK_CALL_TIMEOUT
+        )
         return [
             TextContent(
                 type="text",

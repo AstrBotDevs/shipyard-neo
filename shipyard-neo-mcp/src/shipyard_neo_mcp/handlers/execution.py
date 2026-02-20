@@ -39,7 +39,9 @@ async def handle_execute_python(arguments: dict[str, Any]) -> list[TextContent]:
         )
 
     if result.success:
-        output = truncate_text(result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS)
+        output = truncate_text(
+            result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS
+        )
         suffix = ""
         if result.execution_id:
             suffix += f"\n\nexecution_id: {result.execution_id}"
@@ -54,7 +56,9 @@ async def handle_execute_python(arguments: dict[str, Any]) -> list[TextContent]:
             )
         ]
     else:
-        error = truncate_text(result.error or "Unknown error", limit=_config.MAX_TOOL_TEXT_CHARS)
+        error = truncate_text(
+            result.error or "Unknown error", limit=_config.MAX_TOOL_TEXT_CHARS
+        )
         suffix = ""
         if result.execution_id:
             suffix += f"\n\nexecution_id: {result.execution_id}"
@@ -87,7 +91,9 @@ async def handle_execute_shell(arguments: dict[str, Any]) -> list[TextContent]:
             tags=tags,
         )
 
-    output = truncate_text(result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS)
+    output = truncate_text(
+        result.output or "(no output)", limit=_config.MAX_TOOL_TEXT_CHARS
+    )
     status = "successful" if result.success else "failed"
     exit_code = result.exit_code if result.exit_code is not None else "N/A"
     suffix = ""

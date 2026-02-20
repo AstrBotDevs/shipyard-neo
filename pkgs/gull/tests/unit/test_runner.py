@@ -196,7 +196,9 @@ async def test_run_agent_browser_returncode_none_coerces_to_zero(
 
 
 @pytest.mark.asyncio
-async def test_ensure_browser_ready_probe_success_skips_open(monkeypatch: pytest.MonkeyPatch):
+async def test_ensure_browser_ready_probe_success_skips_open(
+    monkeypatch: pytest.MonkeyPatch,
+):
     calls: list[str] = []
 
     async def fake_run(cmd: str, **_kwargs):
@@ -304,7 +306,9 @@ async def test_exec_command_omits_profile_when_browser_ready_true(
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
     monkeypatch.setattr(gull_main, "_browser_ready", True)
 
-    await gull_main.exec_command(gull_main.ExecRequest(cmd="open about:blank", timeout=5))
+    await gull_main.exec_command(
+        gull_main.ExecRequest(cmd="open about:blank", timeout=5)
+    )
 
     assert captured["profile"] is None
 
@@ -327,7 +331,9 @@ async def test_exec_command_injects_profile_when_browser_ready_false(
     monkeypatch.setattr(gull_main, "_browser_ready", False)
     monkeypatch.setattr(gull_main, "BROWSER_PROFILE_DIR", "/workspace/.browser/profile")
 
-    await gull_main.exec_command(gull_main.ExecRequest(cmd="open about:blank", timeout=5))
+    await gull_main.exec_command(
+        gull_main.ExecRequest(cmd="open about:blank", timeout=5)
+    )
 
     assert captured["profile"] == "/workspace/.browser/profile"
 
@@ -358,7 +364,9 @@ async def test_exec_batch_does_not_execute_step_when_budget_exactly_exhausted(
     monkeypatch.setattr(gull_main, "_run_agent_browser", fake_run)
 
     response = await gull_main.exec_batch(
-        gull_main.BatchExecRequest(commands=["open about:blank", "get title"], timeout=2)
+        gull_main.BatchExecRequest(
+            commands=["open about:blank", "get title"], timeout=2
+        )
     )
 
     assert executed == ["open about:blank"]

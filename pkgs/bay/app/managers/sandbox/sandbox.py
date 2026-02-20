@@ -320,9 +320,7 @@ class SandboxManager:
             )
 
             # Update idle timeout
-            locked_sandbox.idle_expires_at = utcnow() + timedelta(
-                seconds=profile.idle_timeout
-            )
+            locked_sandbox.idle_expires_at = utcnow() + timedelta(seconds=profile.idle_timeout)
             locked_sandbox.last_active_at = utcnow()
             await self._db.commit()
 
