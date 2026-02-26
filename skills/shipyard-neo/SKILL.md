@@ -201,6 +201,14 @@ Use optional metadata fields (`summary`, `usage_notes`, `preconditions`, `postco
 
 See [references/skills-lifecycle.md](references/skills-lifecycle.md) for the complete workflow, including optional metadata fields for candidate creation and release promotion.
 
+When creating/using self-iteration skills, apply these payload/replay rules:
+
+- Payload created via `create_skill_payload` must be a JSON object or array (top-level scalar values are invalid).
+- Use `payload_ref` (`blob:...`) as reusable external payload storage.
+- Browser skill replay is supported via `/{sandbox_id}/browser/skills/{skill_key}/run` and replays `commands` from candidate payload.
+- For browser replay, candidate payload must be a JSON object with non-empty `commands` array.
+- Python/Shell currently do not have release-based skill replay endpoints (`run_*_skill`); only direct execution APIs are available.
+
 ## Key Constraints
 
 | Constraint | Value |

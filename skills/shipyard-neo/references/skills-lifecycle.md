@@ -133,6 +133,32 @@ create_skill_candidate(
 - `preconditions` (optional): Structured preconditions (JSON object)
 - `postconditions` (optional): Structured expected outcomes (JSON object)
 
+### Payload Format and Replay Behavior (Important)
+
+`create_skill_payload` currently accepts only:
+
+- JSON object
+- JSON array
+
+Top-level scalar payloads (`string`/`number`/`boolean`/`null`) are invalid.
+
+`payload_ref` is a stable blob reference (`blob:...`) and can be used in two ways:
+
+1. **Generic payload storage/lookup**
+   - Use `create_skill_payload` to store payload data
+   - Use `get_skill_payload` to retrieve payload content by `payload_ref`
+
+2. **Attach to candidate as external payload**
+   - Set candidate `payload_ref` when creating a candidate
+
+Replay support matrix:
+
+- **Browser skill replay: supported**
+  - `/{sandbox_id}/browser/skills/{skill_key}/run` replays commands from candidate payload
+  - Candidate payload must be a JSON object with a non-empty `commands` array
+- **Python/Shell skill replay: not supported yet**
+  - Python/Shell can be re-executed directly, but there is no release-based `run_*_skill` replay endpoint currently
+
 ### Step 5: Evaluate Skill Candidate
 
 Record evaluation results for the candidate:
