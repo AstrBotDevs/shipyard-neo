@@ -179,6 +179,8 @@ class SkillManager:
         *,
         reason: str | None = None,
     ) -> dict[str, Any]:
+        # Server-side behavior may allow deleting an active release;
+        # callers should rely on API response semantics.
         response = await self._http.delete(
             f"/v1/skills/releases/{release_id}",
             json={"reason": reason} if reason is not None else {},

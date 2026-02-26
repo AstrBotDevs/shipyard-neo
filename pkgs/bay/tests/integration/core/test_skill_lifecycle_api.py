@@ -353,13 +353,16 @@ async def test_skill_delete_release_and_candidate_flow():
             assert promote_a.status_code == 200
             release_a = promote_a.json()
 
-            # Active release cannot be deleted.
+            # Active release can now be soft-deleted directly.
             delete_active_release = await client.request(
                 "DELETE",
                 f"/v1/skills/releases/{release_a['id']}",
-                json={"reason": "cleanup"},
+                json={"reason": "cleanup-active"},
             )
-            assert delete_active_release.status_code == 409
+            assert delete_active_release.status_code == 200
+            deleted_active_release = delete_active_release.json()
+            assert deleted_active_release["id"] == release_a["id"]
+            assert deleted_active_release["delete_reason"] == "cleanup-active"
 
             exec_b = await _create_python_execution(client, sandbox_id, "print('delete-b')")
             create_b = await client.post(
@@ -381,18 +384,6 @@ async def test_skill_delete_release_and_candidate_flow():
             )
             assert promote_b.status_code == 200
             release_b = promote_b.json()
-
-            # Old release is now inactive and can be soft-deleted.
-            delete_release = await client.request(
-                "DELETE",
-                f"/v1/skills/releases/{release_a['id']}",
-                json={"reason": "cleanup"},
-            )
-            assert delete_release.status_code == 200
-            deleted_release = delete_release.json()
-            assert deleted_release["id"] == release_a["id"]
-            assert deleted_release["delete_reason"] == "cleanup"
-            assert deleted_release["deleted_at"] is not None
 
             # Deleted release is no longer returned by list endpoint.
             list_releases = await client.get(
