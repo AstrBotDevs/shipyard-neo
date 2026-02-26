@@ -209,6 +209,54 @@ async def handle_list_skill_releases(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+async def handle_delete_skill_release(
+    arguments: dict[str, Any],
+) -> list[TextContent]:
+    """Soft-delete one inactive skill release."""
+    client = get_client()
+    release_id = require_str(arguments, "release_id")
+    async with asyncio.timeout(_config.SDK_CALL_TIMEOUT):
+        deleted = await client.skills.delete_release(
+            release_id,
+            reason=optional_str(arguments, "reason"),
+        )
+    return [
+        TextContent(
+            type="text",
+            text=(
+                f"Skill release deleted: {release_id}\n"
+                f"deleted_at: {deleted.get('deleted_at')}\n"
+                f"deleted_by: {deleted.get('deleted_by')}\n"
+                f"delete_reason: {deleted.get('delete_reason')}"
+            ),
+        )
+    ]
+
+
+async def handle_delete_skill_candidate(
+    arguments: dict[str, Any],
+) -> list[TextContent]:
+    """Soft-delete one skill candidate."""
+    client = get_client()
+    candidate_id = require_str(arguments, "candidate_id")
+    async with asyncio.timeout(_config.SDK_CALL_TIMEOUT):
+        deleted = await client.skills.delete_candidate(
+            candidate_id,
+            reason=optional_str(arguments, "reason"),
+        )
+    return [
+        TextContent(
+            type="text",
+            text=(
+                f"Skill candidate deleted: {candidate_id}\n"
+                f"deleted_at: {deleted.get('deleted_at')}\n"
+                f"deleted_by: {deleted.get('deleted_by')}\n"
+                f"delete_reason: {deleted.get('delete_reason')}"
+            ),
+        )
+    ]
+
+
 async def handle_rollback_skill_release(
     arguments: dict[str, Any],
 ) -> list[TextContent]:

@@ -343,6 +343,22 @@ class FakeSkills:
         _ = (skill_key, active_only, stage, limit, offset)
         return SimpleNamespace(total=0, items=[])
 
+    async def delete_release(self, release_id: str, *, reason: str | None = None):
+        return {
+            "id": release_id,
+            "deleted_at": "2026-02-08T00:03:00Z",
+            "deleted_by": "default",
+            "delete_reason": reason,
+        }
+
+    async def delete_candidate(self, candidate_id: str, *, reason: str | None = None):
+        return {
+            "id": candidate_id,
+            "deleted_at": "2026-02-08T00:04:00Z",
+            "deleted_by": "default",
+            "delete_reason": reason,
+        }
+
     async def rollback_release(self, release_id: str):
         return SimpleNamespace(
             id="sr-2",
@@ -413,6 +429,8 @@ async def test_list_tools_contains_history_and_skill_tools():
     assert "get_skill_payload" in names
     assert "create_skill_candidate" in names
     assert "promote_skill_candidate" in names
+    assert "delete_skill_release" in names
+    assert "delete_skill_candidate" in names
     assert "rollback_skill_release" in names
     assert "execute_browser" in names
     assert "execute_browser_batch" in names
@@ -570,6 +588,32 @@ async def test_promote_skill_candidate_forwards_upgrade_fields():
     text = response[0].text
     assert "upgrade_of_release_id: sr-0" in text
     assert "upgrade_reason: manual_promote" in text
+
+
+@pytest.mark.asyncio
+async def test_delete_skill_release_formats_result():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "delete_skill_release",
+        {"release_id": "sr-1", "reason": "cleanup"},
+    )
+    text = response[0].text
+    assert "Skill release deleted: sr-1" in text
+    assert "delete_reason: cleanup" in text
+
+
+@pytest.mark.asyncio
+async def test_delete_skill_candidate_formats_result():
+    mcp_server._client = FakeClient()
+
+    response = await mcp_server.call_tool(
+        "delete_skill_candidate",
+        {"candidate_id": "sc-1"},
+    )
+    text = response[0].text
+    assert "Skill candidate deleted: sc-1" in text
+    assert "deleted_at:" in text
 
 
 @pytest.mark.asyncio

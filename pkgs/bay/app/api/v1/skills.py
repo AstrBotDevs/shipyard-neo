@@ -52,6 +52,10 @@ class SkillCandidateResponse(BaseModel):
     created_by: str | None
     created_at: datetime
     updated_at: datetime
+    is_deleted: bool
+    deleted_at: datetime | None
+    deleted_by: str | None
+    delete_reason: str | None
 
 
 class SkillCandidateListResponse(BaseModel):
@@ -110,6 +114,10 @@ class SkillReleaseResponse(BaseModel):
     upgrade_of_release_id: str | None
     upgrade_reason: str | None
     change_summary: str | None
+    is_deleted: bool
+    deleted_at: datetime | None
+    deleted_by: str | None
+    delete_reason: str | None
 
 
 class SkillReleaseHealthResponse(BaseModel):
@@ -165,6 +173,21 @@ class SkillPayloadResponse(BaseModel):
     payload: dict[str, Any] | list[Any]
 
 
+class SkillDeleteRequest(BaseModel):
+    """Delete request."""
+
+    reason: str | None = None
+
+
+class SkillDeleteResponse(BaseModel):
+    """Delete response."""
+
+    id: str
+    deleted_at: datetime
+    deleted_by: str | None
+    delete_reason: str | None
+
+
 def _json_field_to_obj(raw: str | None) -> dict[str, Any] | None:
     if raw is None:
         return None
@@ -198,6 +221,10 @@ def _candidate_to_response(candidate) -> SkillCandidateResponse:
         created_by=candidate.created_by,
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
+        is_deleted=candidate.is_deleted,
+        deleted_at=candidate.deleted_at,
+        deleted_by=candidate.deleted_by,
+        delete_reason=candidate.delete_reason,
     )
 
 
@@ -231,6 +258,10 @@ def _release_to_response(release) -> SkillReleaseResponse:
         upgrade_of_release_id=release.upgrade_of_release_id,
         upgrade_reason=release.upgrade_reason,
         change_summary=release.change_summary,
+        is_deleted=release.is_deleted,
+        deleted_at=release.deleted_at,
+        deleted_by=release.deleted_by,
+        delete_reason=release.delete_reason,
     )
 
 
@@ -409,6 +440,48 @@ async def get_release_health(
 ) -> SkillReleaseHealthResponse:
     health = await skill_svc.get_release_health(owner=owner, release_id=release_id)
     return SkillReleaseHealthResponse(**health)
+
+
+@router.delete("/releases/{release_id}", response_model=SkillDeleteResponse)
+async def delete_release(
+    release_id: str,
+    request: SkillDeleteRequest,
+    skill_svc: SkillLifecycleServiceDep,
+    owner: AuthDep,
+) -> SkillDeleteResponse:
+    deleted = await skill_svc.delete_release(
+        owner=owner,
+        release_id=release_id,
+        deleted_by=owner,
+        reason=request.reason,
+    )
+    return SkillDeleteResponse(
+        id=deleted.id,
+        deleted_at=deleted.deleted_at,
+        deleted_by=deleted.deleted_by,
+        delete_reason=deleted.delete_reason,
+    )
+
+
+@router.delete("/candidates/{candidate_id}", response_model=SkillDeleteResponse)
+async def delete_candidate(
+    candidate_id: str,
+    request: SkillDeleteRequest,
+    skill_svc: SkillLifecycleServiceDep,
+    owner: AuthDep,
+) -> SkillDeleteResponse:
+    deleted = await skill_svc.delete_candidate(
+        owner=owner,
+        candidate_id=candidate_id,
+        deleted_by=owner,
+        reason=request.reason,
+    )
+    return SkillDeleteResponse(
+        id=deleted.id,
+        deleted_at=deleted.deleted_at,
+        deleted_by=deleted.deleted_by,
+        delete_reason=deleted.delete_reason,
+    )
 
 
 @router.post("/releases/{release_id}/rollback", response_model=SkillReleaseResponse)

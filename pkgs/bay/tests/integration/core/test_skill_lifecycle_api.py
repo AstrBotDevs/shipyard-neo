@@ -324,3 +324,112 @@ async def test_skill_payload_get_returns_not_found_for_unknown_blob():
     async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         resp = await client.get("/v1/skills/payloads/blob:missing-payload", timeout=30.0)
         assert resp.status_code == 404
+
+
+async def test_skill_delete_release_and_candidate_flow():
+    """Soft-delete endpoints should enforce constraints and hide deleted records."""
+    async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with create_sandbox(client) as sandbox:
+            sandbox_id = sandbox["id"]
+
+            exec_a = await _create_python_execution(client, sandbox_id, "print('delete-a')")
+            create_a = await client.post(
+                "/v1/skills/candidates",
+                json={"skill_key": "delete-skill", "source_execution_ids": [exec_a]},
+            )
+            assert create_a.status_code == 201
+            candidate_a = create_a.json()
+
+            eval_a = await client.post(
+                f"/v1/skills/candidates/{candidate_a['id']}/evaluate",
+                json={"passed": True, "score": 0.9},
+            )
+            assert eval_a.status_code == 200
+
+            promote_a = await client.post(
+                f"/v1/skills/candidates/{candidate_a['id']}/promote",
+                json={"stage": "stable"},
+            )
+            assert promote_a.status_code == 200
+            release_a = promote_a.json()
+
+            # Active release cannot be deleted.
+            delete_active_release = await client.request(
+                "DELETE",
+                f"/v1/skills/releases/{release_a['id']}",
+                json={"reason": "cleanup"},
+            )
+            assert delete_active_release.status_code == 409
+
+            exec_b = await _create_python_execution(client, sandbox_id, "print('delete-b')")
+            create_b = await client.post(
+                "/v1/skills/candidates",
+                json={"skill_key": "delete-skill", "source_execution_ids": [exec_b]},
+            )
+            assert create_b.status_code == 201
+            candidate_b = create_b.json()
+
+            eval_b = await client.post(
+                f"/v1/skills/candidates/{candidate_b['id']}/evaluate",
+                json={"passed": True, "score": 0.95},
+            )
+            assert eval_b.status_code == 200
+
+            promote_b = await client.post(
+                f"/v1/skills/candidates/{candidate_b['id']}/promote",
+                json={"stage": "canary"},
+            )
+            assert promote_b.status_code == 200
+            release_b = promote_b.json()
+
+            # Old release is now inactive and can be soft-deleted.
+            delete_release = await client.request(
+                "DELETE",
+                f"/v1/skills/releases/{release_a['id']}",
+                json={"reason": "cleanup"},
+            )
+            assert delete_release.status_code == 200
+            deleted_release = delete_release.json()
+            assert deleted_release["id"] == release_a["id"]
+            assert deleted_release["delete_reason"] == "cleanup"
+            assert deleted_release["deleted_at"] is not None
+
+            # Deleted release is no longer returned by list endpoint.
+            list_releases = await client.get(
+                "/v1/skills/releases",
+                params={"skill_key": "delete-skill"},
+            )
+            assert list_releases.status_code == 200
+            listed_release_ids = [item["id"] for item in list_releases.json()["items"]]
+            assert release_a["id"] not in listed_release_ids
+
+            # Candidate with active release reference cannot be deleted.
+            delete_active_candidate = await client.request(
+                "DELETE",
+                f"/v1/skills/candidates/{candidate_b['id']}",
+                json={},
+            )
+            assert delete_active_candidate.status_code == 409
+
+            # Candidate whose releases are all inactive/deleted can be deleted.
+            delete_candidate = await client.request(
+                "DELETE",
+                f"/v1/skills/candidates/{candidate_a['id']}",
+                json={"reason": "stale"},
+            )
+            assert delete_candidate.status_code == 200
+            deleted_candidate = delete_candidate.json()
+            assert deleted_candidate["id"] == candidate_a["id"]
+            assert deleted_candidate["delete_reason"] == "stale"
+
+            # Deleted candidate should be hidden from list/get APIs.
+            list_candidates = await client.get(
+                "/v1/skills/candidates",
+                params={"skill_key": "delete-skill"},
+            )
+            assert list_candidates.status_code == 200
+            listed_candidate_ids = [item["id"] for item in list_candidates.json()["items"]]
+            assert candidate_a["id"] not in listed_candidate_ids
+
+            get_deleted_candidate = await client.get(f"/v1/skills/candidates/{candidate_a['id']}")
+            assert get_deleted_candidate.status_code == 404
