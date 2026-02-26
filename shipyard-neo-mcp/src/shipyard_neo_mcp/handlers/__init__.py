@@ -30,6 +30,8 @@ from shipyard_neo_mcp.handlers.skills import (
     handle_promote_skill_candidate,
     handle_list_skill_candidates,
     handle_list_skill_releases,
+    handle_delete_skill_release,
+    handle_delete_skill_candidate,
     handle_rollback_skill_release,
 )
 from shipyard_neo_mcp.handlers.browser import (
@@ -60,6 +62,8 @@ __all__ = [
     "handle_promote_skill_candidate",
     "handle_list_skill_candidates",
     "handle_list_skill_releases",
+    "handle_delete_skill_release",
+    "handle_delete_skill_candidate",
     "handle_rollback_skill_release",
     "handle_execute_browser",
     "handle_execute_browser_batch",
@@ -87,6 +91,8 @@ TOOL_HANDLERS = {
     "promote_skill_candidate": handle_promote_skill_candidate,
     "list_skill_candidates": handle_list_skill_candidates,
     "list_skill_releases": handle_list_skill_releases,
+    "delete_skill_release": handle_delete_skill_release,
+    "delete_skill_candidate": handle_delete_skill_candidate,
     "rollback_skill_release": handle_rollback_skill_release,
     "execute_browser": handle_execute_browser,
     "execute_browser_batch": handle_execute_browser_batch,

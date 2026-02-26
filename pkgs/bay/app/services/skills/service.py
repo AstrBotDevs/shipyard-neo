@@ -488,6 +488,7 @@ class SkillLifecycleService:
             select(SkillCandidate).where(
                 SkillCandidate.id == candidate_id,
                 SkillCandidate.owner == owner,
+                SkillCandidate.is_deleted.is_(False),
             )
         )
         candidate = result.scalars().first()
@@ -509,7 +510,10 @@ class SkillLifecycleService:
         if offset < 0:
             raise ValidationError("offset must be >= 0")
 
-        filters = [SkillCandidate.owner == owner]
+        filters = [
+            SkillCandidate.owner == owner,
+            SkillCandidate.is_deleted.is_(False),
+        ]
         if status is not None:
             filters.append(SkillCandidate.status == status)
         if skill_key is not None:
@@ -627,6 +631,7 @@ class SkillLifecycleService:
                 SkillRelease.owner == owner,
                 SkillRelease.skill_key == candidate.skill_key,
                 SkillRelease.is_active.is_(True),
+                SkillRelease.is_deleted.is_(False),
             )
         )
         for release in active_result.scalars().all():
@@ -688,7 +693,10 @@ class SkillLifecycleService:
         if offset < 0:
             raise ValidationError("offset must be >= 0")
 
-        filters = [SkillRelease.owner == owner]
+        filters = [
+            SkillRelease.owner == owner,
+            SkillRelease.is_deleted.is_(False),
+        ]
         if skill_key is not None:
             filters.append(SkillRelease.skill_key == skill_key)
         if active_only:
@@ -718,6 +726,7 @@ class SkillLifecycleService:
             .where(
                 SkillRelease.stage == SkillReleaseStage.CANARY,
                 SkillRelease.is_active.is_(True),
+                SkillRelease.is_deleted.is_(False),
                 SkillRelease.release_mode == SkillReleaseMode.AUTO,
             )
             .order_by(SkillRelease.promoted_at.asc())
@@ -739,6 +748,7 @@ class SkillLifecycleService:
             SkillRelease.owner == owner,
             SkillRelease.skill_key == skill_key,
             SkillRelease.is_active.is_(True),
+            SkillRelease.is_deleted.is_(False),
         )
         if stage is not None:
             query = query.where(SkillRelease.stage == stage)
@@ -762,6 +772,7 @@ class SkillLifecycleService:
                 SkillRelease.owner == owner,
                 SkillRelease.skill_key == current.skill_key,
                 SkillRelease.version < current.version,
+                SkillRelease.is_deleted.is_(False),
             )
             .order_by(SkillRelease.version.desc())
             .limit(1)
@@ -786,6 +797,7 @@ class SkillLifecycleService:
                 SkillRelease.owner == owner,
                 SkillRelease.skill_key == current.skill_key,
                 SkillRelease.is_active.is_(True),
+                SkillRelease.is_deleted.is_(False),
             )
         )
         for release in active_result.scalars().all():
@@ -996,9 +1008,81 @@ class SkillLifecycleService:
             select(SkillRelease).where(
                 SkillRelease.id == release_id,
                 SkillRelease.owner == owner,
+                SkillRelease.is_deleted.is_(False),
             )
         )
         release = result.scalars().first()
         if release is None:
             raise NotFoundError(f"Skill release not found: {release_id}")
         return release
+
+    async def delete_release(
+        self,
+        *,
+        owner: str,
+        release_id: str,
+        deleted_by: str | None = None,
+        reason: str | None = None,
+    ) -> SkillRelease:
+        result = await self._db.execute(
+            select(SkillRelease).where(
+                SkillRelease.id == release_id,
+                SkillRelease.owner == owner,
+            )
+        )
+        release = result.scalars().first()
+        if release is None or release.is_deleted:
+            raise NotFoundError(f"Skill release not found: {release_id}")
+        if release.is_active:
+            raise ConflictError(
+                "Active release cannot be deleted",
+                details={"release_id": release_id},
+            )
+
+        release.is_deleted = True
+        release.deleted_at = utcnow()
+        release.deleted_by = deleted_by
+        release.delete_reason = reason
+        await self._db.commit()
+        await self._db.refresh(release)
+        return release
+
+    async def delete_candidate(
+        self,
+        *,
+        owner: str,
+        candidate_id: str,
+        deleted_by: str | None = None,
+        reason: str | None = None,
+    ) -> SkillCandidate:
+        result = await self._db.execute(
+            select(SkillCandidate).where(
+                SkillCandidate.id == candidate_id,
+                SkillCandidate.owner == owner,
+            )
+        )
+        candidate = result.scalars().first()
+        if candidate is None or candidate.is_deleted:
+            raise NotFoundError(f"Skill candidate not found: {candidate_id}")
+
+        active_release_result = await self._db.execute(
+            select(SkillRelease.id).where(
+                SkillRelease.owner == owner,
+                SkillRelease.candidate_id == candidate_id,
+                SkillRelease.is_active.is_(True),
+                SkillRelease.is_deleted.is_(False),
+            )
+        )
+        if active_release_result.first() is not None:
+            raise ConflictError(
+                "Candidate referenced by active release cannot be deleted",
+                details={"candidate_id": candidate_id},
+            )
+
+        candidate.is_deleted = True
+        candidate.deleted_at = utcnow()
+        candidate.deleted_by = deleted_by
+        candidate.delete_reason = reason
+        await self._db.commit()
+        await self._db.refresh(candidate)
+        return candidate

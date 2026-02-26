@@ -245,10 +245,11 @@ class HTTPClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         """Make a DELETE request."""
-        return await self.request("DELETE", path, params=params, timeout=timeout)
+        return await self.request("DELETE", path, params=params, json=json, timeout=timeout)
 
     async def upload(
         self,

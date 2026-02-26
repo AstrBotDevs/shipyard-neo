@@ -137,6 +137,7 @@ class SkillCandidate(SQLModel, table=True):
     source_execution_ids: str = Field(default="")
 
     status: SkillCandidateStatus = Field(default=SkillCandidateStatus.DRAFT, index=True)
+    is_deleted: bool = Field(default=False, index=True)
 
     created_by: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow, index=True)
@@ -147,6 +148,10 @@ class SkillCandidate(SQLModel, table=True):
     last_evaluated_at: datetime | None = Field(default=None)
 
     promotion_release_id: str | None = Field(default=None, index=True)
+
+    deleted_at: datetime | None = Field(default=None, index=True)
+    deleted_by: str | None = Field(default=None)
+    delete_reason: str | None = Field(default=None)
 
 
 class SkillEvaluation(SQLModel, table=True):
@@ -182,6 +187,7 @@ class SkillRelease(SQLModel, table=True):
     version: int = Field(index=True)
     stage: SkillReleaseStage = Field(default=SkillReleaseStage.CANARY, index=True)
     is_active: bool = Field(default=True, index=True)
+    is_deleted: bool = Field(default=False, index=True)
     release_mode: SkillReleaseMode = Field(default=SkillReleaseMode.MANUAL, index=True)
 
     promoted_by: str | None = Field(default=None)
@@ -195,3 +201,7 @@ class SkillRelease(SQLModel, table=True):
     upgrade_of_release_id: str | None = Field(default=None, index=True)
     upgrade_reason: str | None = Field(default=None)
     change_summary: str | None = Field(default=None)
+
+    deleted_at: datetime | None = Field(default=None, index=True)
+    deleted_by: str | None = Field(default=None)
+    delete_reason: str | None = Field(default=None)

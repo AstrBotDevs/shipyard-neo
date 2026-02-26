@@ -365,6 +365,52 @@ class TestSkillsManagerAndHistory:
             assert rollback.stage.value == "stable"
 
     @pytest.mark.asyncio
+    async def test_skills_delete_release_and_candidate(self, httpx_mock):
+        """skills.delete_release/delete_candidate should send optional reason in DELETE body."""
+        httpx_mock.add_response(
+            method="DELETE",
+            url="http://localhost:8000/v1/skills/releases/sr-9",
+            json={
+                "id": "sr-9",
+                "deleted_at": "2026-02-08T00:10:00Z",
+                "deleted_by": "default",
+                "delete_reason": "cleanup",
+            },
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            method="DELETE",
+            url="http://localhost:8000/v1/skills/candidates/sc-9",
+            json={
+                "id": "sc-9",
+                "deleted_at": "2026-02-08T00:11:00Z",
+                "deleted_by": "default",
+                "delete_reason": None,
+            },
+            status_code=200,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            release_deleted = await client.skills.delete_release("sr-9", reason="cleanup")
+            assert release_deleted["id"] == "sr-9"
+            assert release_deleted["delete_reason"] == "cleanup"
+
+            candidate_deleted = await client.skills.delete_candidate("sc-9")
+            assert candidate_deleted["id"] == "sc-9"
+            assert candidate_deleted["delete_reason"] is None
+
+        req_release = httpx_mock.get_requests()[-2]
+        body_release = json.loads(req_release.content.decode("utf-8"))
+        assert body_release == {"reason": "cleanup"}
+
+        req_candidate = httpx_mock.get_requests()[-1]
+        body_candidate = json.loads(req_candidate.content.decode("utf-8"))
+        assert body_candidate == {}
+
+    @pytest.mark.asyncio
     async def test_skills_get_release_health(self, httpx_mock):
         """skills.get_release_health should parse health payload."""
         httpx_mock.add_response(

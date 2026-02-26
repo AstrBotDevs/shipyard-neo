@@ -173,6 +173,30 @@ class SkillManager:
         )
         return SkillReleaseList.model_validate(response)
 
+    async def delete_release(
+        self,
+        release_id: str,
+        *,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        response = await self._http.delete(
+            f"/v1/skills/releases/{release_id}",
+            json={"reason": reason} if reason is not None else {},
+        )
+        return response
+
+    async def delete_candidate(
+        self,
+        candidate_id: str,
+        *,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        response = await self._http.delete(
+            f"/v1/skills/candidates/{candidate_id}",
+            json={"reason": reason} if reason is not None else {},
+        )
+        return response
+
     async def rollback_release(self, release_id: str) -> SkillReleaseInfo:
         response = await self._http.post(f"/v1/skills/releases/{release_id}/rollback")
         return SkillReleaseInfo.model_validate(response)

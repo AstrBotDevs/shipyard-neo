@@ -466,6 +466,42 @@ def get_tool_definitions() -> list[Tool]:
             },
         ),
         Tool(
+            name="delete_skill_release",
+            description="Soft-delete one inactive skill release. Active releases must be rolled forward/rolled back first.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "release_id": {
+                        "type": "string",
+                        "description": "Release ID to delete.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional delete reason for audit trail.",
+                    },
+                },
+                "required": ["release_id"],
+            },
+        ),
+        Tool(
+            name="delete_skill_candidate",
+            description="Soft-delete one skill candidate. Candidates referenced by active releases cannot be deleted.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "candidate_id": {
+                        "type": "string",
+                        "description": "Candidate ID to delete.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional delete reason for audit trail.",
+                    },
+                },
+                "required": ["candidate_id"],
+            },
+        ),
+        Tool(
             name="rollback_skill_release",
             description="Rollback an active release to a previous known-good version.",
             inputSchema={

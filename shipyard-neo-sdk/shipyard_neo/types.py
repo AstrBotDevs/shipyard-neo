@@ -286,6 +286,10 @@ class SkillCandidateInfo(BaseModel):
     created_by: str | None = None
     created_at: datetime
     updated_at: datetime
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
+    deleted_by: str | None = None
+    delete_reason: str | None = None
 
 
 class SkillCandidateList(BaseModel):
@@ -326,6 +330,10 @@ class SkillReleaseInfo(BaseModel):
     upgrade_of_release_id: str | None = None
     upgrade_reason: str | None = None
     change_summary: str | None = None
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
+    deleted_by: str | None = None
+    delete_reason: str | None = None
 
 
 class SkillReleaseList(BaseModel):
