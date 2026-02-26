@@ -42,12 +42,20 @@ async def test_candidate_evaluate_promote_and_rollback_flow():
                     "source_execution_ids": [exec_a],
                     "scenario_key": "etl.csv",
                     "payload_ref": "s3://skills/csv-loader/a",
+                    "summary": "Load CSV into warehouse",
+                    "usage_notes": "Requires warehouse credentials",
+                    "preconditions": {"runtime": "python"},
+                    "postconditions": {"table": "created"},
                 },
             )
             assert create_a.status_code == 201
             candidate_a = create_a.json()
             assert candidate_a["status"] == "draft"
             assert candidate_a["source_execution_ids"] == [exec_a]
+            assert candidate_a["summary"] == "Load CSV into warehouse"
+            assert candidate_a["usage_notes"] == "Requires warehouse credentials"
+            assert candidate_a["preconditions"] == {"runtime": "python"}
+            assert candidate_a["postconditions"] == {"table": "created"}
 
             evaluate_a = await client.post(
                 f"/v1/skills/candidates/{candidate_a['id']}/evaluate",
@@ -63,7 +71,11 @@ async def test_candidate_evaluate_promote_and_rollback_flow():
 
             promote_a = await client.post(
                 f"/v1/skills/candidates/{candidate_a['id']}/promote",
-                json={"stage": "stable"},
+                json={
+                    "stage": "stable",
+                    "upgrade_reason": "manual_promote",
+                    "change_summary": "Baseline stable release",
+                },
             )
             assert promote_a.status_code == 200
             release_a = promote_a.json()
@@ -71,6 +83,9 @@ async def test_candidate_evaluate_promote_and_rollback_flow():
             assert release_a["version"] == 1
             assert release_a["stage"] == "stable"
             assert release_a["is_active"] is True
+            assert release_a["upgrade_reason"] == "manual_promote"
+            assert release_a["change_summary"] == "Baseline stable release"
+            assert release_a["upgrade_of_release_id"] is None
 
             exec_b = await _create_python_execution(client, sandbox_id, "print('candidate-b')")
             create_b = await client.post(
@@ -91,12 +106,19 @@ async def test_candidate_evaluate_promote_and_rollback_flow():
             assert evaluate_b.status_code == 200
             promote_b = await client.post(
                 f"/v1/skills/candidates/{candidate_b['id']}/promote",
-                json={"stage": "canary"},
+                json={
+                    "stage": "canary",
+                    "upgrade_of_release_id": release_a["id"],
+                    "upgrade_reason": "metric_improved",
+                    "change_summary": "Improved parsing accuracy",
+                },
             )
             assert promote_b.status_code == 200
             release_b = promote_b.json()
             assert release_b["version"] == 2
             assert release_b["is_active"] is True
+            assert release_b["upgrade_of_release_id"] == release_a["id"]
+            assert release_b["upgrade_reason"] == "metric_improved"
 
             list_active = await client.get(
                 "/v1/skills/releases",

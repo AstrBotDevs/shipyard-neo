@@ -127,6 +127,12 @@ class SkillCandidate(SQLModel, table=True):
     auto_release_eligible: bool = Field(default=False, index=True)
     auto_release_reason: str | None = Field(default=None)
 
+    # Human-readable skill documentation fields.
+    summary: str | None = Field(default=None)
+    usage_notes: str | None = Field(default=None)
+    preconditions_json: str | None = Field(default=None)
+    postconditions_json: str | None = Field(default=None)
+
     # Comma-separated execution IDs used as source evidence.
     source_execution_ids: str = Field(default="")
 
@@ -184,3 +190,8 @@ class SkillRelease(SQLModel, table=True):
     rollback_of: str | None = Field(default=None, index=True)
     auto_promoted_from: str | None = Field(default=None, index=True)
     health_window_end_at: datetime | None = Field(default=None, index=True)
+
+    # Human-readable release-upgrade metadata.
+    upgrade_of_release_id: str | None = Field(default=None, index=True)
+    upgrade_reason: str | None = Field(default=None)
+    change_summary: str | None = Field(default=None)

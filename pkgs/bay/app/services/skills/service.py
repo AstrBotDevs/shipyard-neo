@@ -419,6 +419,10 @@ class SkillLifecycleService:
         source_execution_ids: list[str],
         scenario_key: str | None = None,
         payload_ref: str | None = None,
+        summary: str | None = None,
+        usage_notes: str | None = None,
+        preconditions: dict[str, Any] | None = None,
+        postconditions: dict[str, Any] | None = None,
         created_by: str | None = None,
         skill_type: SkillType = SkillType.CODE,
         auto_release_eligible: bool = False,
@@ -442,6 +446,16 @@ class SkillLifecycleService:
             skill_type=skill_type,
             auto_release_eligible=auto_release_eligible,
             auto_release_reason=auto_release_reason,
+            summary=summary,
+            usage_notes=usage_notes,
+            preconditions_json=(
+                json.dumps(preconditions, ensure_ascii=False) if preconditions is not None else None
+            ),
+            postconditions_json=(
+                json.dumps(postconditions, ensure_ascii=False)
+                if postconditions is not None
+                else None
+            ),
             status=SkillCandidateStatus.DRAFT,
             created_by=created_by,
             created_at=utcnow(),
@@ -587,6 +601,9 @@ class SkillLifecycleService:
         release_mode: SkillReleaseMode = SkillReleaseMode.MANUAL,
         auto_promoted_from: str | None = None,
         health_window_end_at: datetime | None = None,
+        upgrade_of_release_id: str | None = None,
+        upgrade_reason: str | None = None,
+        change_summary: str | None = None,
     ) -> SkillRelease:
         candidate = await self.get_candidate(owner=owner, candidate_id=candidate_id)
 
@@ -628,6 +645,9 @@ class SkillLifecycleService:
             promoted_at=utcnow(),
             auto_promoted_from=auto_promoted_from,
             health_window_end_at=health_window_end_at,
+            upgrade_of_release_id=upgrade_of_release_id,
+            upgrade_reason=upgrade_reason,
+            change_summary=change_summary,
         )
         self._db.add(release)
 

@@ -311,7 +311,7 @@ def get_tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="create_skill_candidate",
-            description="Create a reusable skill candidate from execution IDs.",
+            description="Create a reusable skill candidate from execution IDs, with optional human-readable summary/notes and pre/post conditions.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -328,6 +328,22 @@ def get_tool_definitions() -> list[Tool]:
                     "payload_ref": {
                         "type": "string",
                         "description": "Optional payload reference.",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Optional human-readable skill summary.",
+                    },
+                    "usage_notes": {
+                        "type": "string",
+                        "description": "Optional usage notes for operators/agents.",
+                    },
+                    "preconditions": {
+                        "type": "object",
+                        "description": "Optional JSON object describing preconditions.",
+                    },
+                    "postconditions": {
+                        "type": "object",
+                        "description": "Optional JSON object describing postconditions.",
                     },
                 },
                 "required": ["skill_key", "source_execution_ids"],
@@ -365,7 +381,7 @@ def get_tool_definitions() -> list[Tool]:
         ),
         Tool(
             name="promote_skill_candidate",
-            description="Promote a passing skill candidate to release.",
+            description="Promote a passing skill candidate to release, with optional upgrade metadata (parent release, reason, and change summary).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -376,6 +392,18 @@ def get_tool_definitions() -> list[Tool]:
                     "stage": {
                         "type": "string",
                         "description": "Release stage: canary or stable. Defaults to canary.",
+                    },
+                    "upgrade_of_release_id": {
+                        "type": "string",
+                        "description": "Optional parent release ID this promotion upgrades from.",
+                    },
+                    "upgrade_reason": {
+                        "type": "string",
+                        "description": "Optional reason for this promotion/upgrade.",
+                    },
+                    "change_summary": {
+                        "type": "string",
+                        "description": "Optional human-readable change summary.",
                     },
                 },
                 "required": ["candidate_id"],

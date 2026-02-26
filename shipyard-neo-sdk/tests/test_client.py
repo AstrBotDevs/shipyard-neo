@@ -262,6 +262,10 @@ class TestBayClient:
                 "skill_key": "csv-loader",
                 "scenario_key": "etl",
                 "payload_ref": None,
+                "summary": "Load CSV into warehouse",
+                "usage_notes": "Requires warehouse credentials",
+                "preconditions": {"runtime": "python"},
+                "postconditions": {"table": "created"},
                 "source_execution_ids": ["exec-1"],
                 "status": "draft",
                 "latest_score": None,
@@ -326,7 +330,11 @@ class TestBayClient:
             )
             assert evaluation.passed is True
 
-            release = await client.skills.promote_candidate("sc-1")
+            release = await client.skills.promote_candidate(
+                "sc-1",
+                upgrade_reason="manual_promote",
+                change_summary="Baseline stable release",
+            )
             assert release.version == 1
             assert release.stage.value == "canary"
 

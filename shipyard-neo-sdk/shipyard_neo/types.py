@@ -273,6 +273,10 @@ class SkillCandidateInfo(BaseModel):
     skill_type: str = "code"
     auto_release_eligible: bool = False
     auto_release_reason: str | None = None
+    summary: str | None = None
+    usage_notes: str | None = None
+    preconditions: dict[str, Any] | None = None
+    postconditions: dict[str, Any] | None = None
     source_execution_ids: list[str]
     status: SkillCandidateStatus
     latest_score: float | None = None
@@ -319,6 +323,9 @@ class SkillReleaseInfo(BaseModel):
     rollback_of: str | None = None
     auto_promoted_from: str | None = None
     health_window_end_at: datetime | None = None
+    upgrade_of_release_id: str | None = None
+    upgrade_reason: str | None = None
+    change_summary: str | None = None
 
 
 class SkillReleaseList(BaseModel):

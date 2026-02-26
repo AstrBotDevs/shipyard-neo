@@ -261,8 +261,19 @@ class FakeSkills:
         source_execution_ids: list[str],
         scenario_key: str | None = None,
         payload_ref: str | None = None,
+        summary: str | None = None,
+        usage_notes: str | None = None,
+        preconditions: dict | None = None,
+        postconditions: dict | None = None,
     ):
-        _ = (scenario_key, payload_ref)
+        _ = (
+            scenario_key,
+            payload_ref,
+            summary,
+            usage_notes,
+            preconditions,
+            postconditions,
+        )
         return SimpleNamespace(
             id="sc-1",
             skill_key=skill_key,
@@ -287,7 +298,15 @@ class FakeSkills:
             score=score,
         )
 
-    async def promote_candidate(self, candidate_id: str, *, stage: str = "canary"):
+    async def promote_candidate(
+        self,
+        candidate_id: str,
+        *,
+        stage: str = "canary",
+        upgrade_of_release_id: str | None = None,
+        upgrade_reason: str | None = None,
+        change_summary: str | None = None,
+    ):
         self.last_promote_stage = stage
         return SimpleNamespace(
             id="sr-1",
@@ -296,6 +315,9 @@ class FakeSkills:
             version=1,
             stage=SkillReleaseStage.CANARY,
             is_active=True,
+            upgrade_of_release_id=upgrade_of_release_id,
+            upgrade_reason=upgrade_reason,
+            change_summary=change_summary,
         )
 
     async def list_candidates(
@@ -526,7 +548,28 @@ async def test_promote_skill_candidate_defaults_to_canary():
     text = response[0].text
     assert "Candidate promoted: sc-1" in text
     assert "stage: canary" in text
+    assert "upgrade_reason: None" in text
     assert skills.last_promote_stage == "canary"
+
+
+@pytest.mark.asyncio
+async def test_promote_skill_candidate_forwards_upgrade_fields():
+    skills = FakeSkills()
+    mcp_server._client = FakeClient(skills=skills)
+
+    response = await mcp_server.call_tool(
+        "promote_skill_candidate",
+        {
+            "candidate_id": "sc-1",
+            "stage": "stable",
+            "upgrade_of_release_id": "sr-0",
+            "upgrade_reason": "manual_promote",
+            "change_summary": "Improve success rate",
+        },
+    )
+    text = response[0].text
+    assert "upgrade_of_release_id: sr-0" in text
+    assert "upgrade_reason: manual_promote" in text
 
 
 @pytest.mark.asyncio

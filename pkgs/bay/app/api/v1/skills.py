@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,10 @@ class SkillCandidateCreateRequest(BaseModel):
     source_execution_ids: list[str]
     scenario_key: str | None = None
     payload_ref: str | None = None
+    summary: str | None = None
+    usage_notes: str | None = None
+    preconditions: dict[str, Any] | None = None
+    postconditions: dict[str, Any] | None = None
 
 
 class SkillCandidateResponse(BaseModel):
@@ -34,6 +39,10 @@ class SkillCandidateResponse(BaseModel):
     skill_type: str
     auto_release_eligible: bool
     auto_release_reason: str | None
+    summary: str | None
+    usage_notes: str | None
+    preconditions: dict[str, Any] | None
+    postconditions: dict[str, Any] | None
     source_execution_ids: list[str]
     status: str
     latest_score: float | None
@@ -78,6 +87,9 @@ class SkillPromotionRequest(BaseModel):
     """Promotion request."""
 
     stage: str = SkillReleaseStage.CANARY.value
+    upgrade_of_release_id: str | None = None
+    upgrade_reason: str | None = None
+    change_summary: str | None = None
 
 
 class SkillReleaseResponse(BaseModel):
@@ -95,6 +107,9 @@ class SkillReleaseResponse(BaseModel):
     rollback_of: str | None
     auto_promoted_from: str | None
     health_window_end_at: datetime | None
+    upgrade_of_release_id: str | None
+    upgrade_reason: str | None
+    change_summary: str | None
 
 
 class SkillReleaseHealthResponse(BaseModel):
@@ -150,6 +165,16 @@ class SkillPayloadResponse(BaseModel):
     payload: dict[str, Any] | list[Any]
 
 
+def _json_field_to_obj(raw: str | None) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _candidate_to_response(candidate) -> SkillCandidateResponse:
     source_execution_ids = [item for item in candidate.source_execution_ids.split(",") if item]
     return SkillCandidateResponse(
@@ -160,6 +185,10 @@ def _candidate_to_response(candidate) -> SkillCandidateResponse:
         skill_type=candidate.skill_type.value,
         auto_release_eligible=candidate.auto_release_eligible,
         auto_release_reason=candidate.auto_release_reason,
+        summary=candidate.summary,
+        usage_notes=candidate.usage_notes,
+        preconditions=_json_field_to_obj(candidate.preconditions_json),
+        postconditions=_json_field_to_obj(candidate.postconditions_json),
         source_execution_ids=source_execution_ids,
         status=candidate.status.value,
         latest_score=candidate.latest_score,
@@ -199,6 +228,9 @@ def _release_to_response(release) -> SkillReleaseResponse:
         rollback_of=release.rollback_of,
         auto_promoted_from=release.auto_promoted_from,
         health_window_end_at=release.health_window_end_at,
+        upgrade_of_release_id=release.upgrade_of_release_id,
+        upgrade_reason=release.upgrade_reason,
+        change_summary=release.change_summary,
     )
 
 
@@ -248,6 +280,10 @@ async def create_candidate(
         source_execution_ids=request.source_execution_ids,
         scenario_key=request.scenario_key,
         payload_ref=request.payload_ref,
+        summary=request.summary,
+        usage_notes=request.usage_notes,
+        preconditions=request.preconditions,
+        postconditions=request.postconditions,
         created_by=owner,
     )
     return _candidate_to_response(candidate)
@@ -327,6 +363,9 @@ async def promote_candidate(
         candidate_id=candidate_id,
         stage=stage,
         promoted_by=owner,
+        upgrade_of_release_id=request.upgrade_of_release_id,
+        upgrade_reason=request.upgrade_reason,
+        change_summary=request.change_summary,
     )
     return _release_to_response(release)
 

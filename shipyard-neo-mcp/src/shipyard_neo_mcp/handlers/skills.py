@@ -75,6 +75,18 @@ async def handle_create_skill_candidate(
             source_execution_ids=source_execution_ids,
             scenario_key=optional_str(arguments, "scenario_key"),
             payload_ref=optional_str(arguments, "payload_ref"),
+            summary=optional_str(arguments, "summary"),
+            usage_notes=optional_str(arguments, "usage_notes"),
+            preconditions=(
+                arguments.get("preconditions")
+                if isinstance(arguments.get("preconditions"), dict)
+                else None
+            ),
+            postconditions=(
+                arguments.get("postconditions")
+                if isinstance(arguments.get("postconditions"), dict)
+                else None
+            ),
         )
     return [
         TextContent(
@@ -129,6 +141,9 @@ async def handle_promote_skill_candidate(
         release = await client.skills.promote_candidate(
             candidate_id,
             stage=read_release_stage(arguments, key="stage", default="canary"),
+            upgrade_of_release_id=optional_str(arguments, "upgrade_of_release_id"),
+            upgrade_reason=optional_str(arguments, "upgrade_reason"),
+            change_summary=optional_str(arguments, "change_summary"),
         )
     return [
         TextContent(
@@ -139,7 +154,9 @@ async def handle_promote_skill_candidate(
                 f"skill_key: {release.skill_key}\n"
                 f"version: {release.version}\n"
                 f"stage: {release.stage.value}\n"
-                f"active: {release.is_active}"
+                f"active: {release.is_active}\n"
+                f"upgrade_of_release_id: {getattr(release, 'upgrade_of_release_id', None)}\n"
+                f"upgrade_reason: {getattr(release, 'upgrade_reason', None)}"
             ),
         )
     ]

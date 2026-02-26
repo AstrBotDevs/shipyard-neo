@@ -57,12 +57,20 @@ class SkillManager:
         source_execution_ids: list[str],
         scenario_key: str | None = None,
         payload_ref: str | None = None,
+        summary: str | None = None,
+        usage_notes: str | None = None,
+        preconditions: dict[str, Any] | None = None,
+        postconditions: dict[str, Any] | None = None,
     ) -> SkillCandidateInfo:
         body = {
             "skill_key": skill_key,
             "source_execution_ids": source_execution_ids,
             "scenario_key": scenario_key,
             "payload_ref": payload_ref,
+            "summary": summary,
+            "usage_notes": usage_notes,
+            "preconditions": preconditions,
+            "postconditions": postconditions,
         }
         # Keep payload compatible with API: omit null fields.
         body = {k: v for k, v in body.items() if v is not None}
@@ -125,11 +133,21 @@ class SkillManager:
         candidate_id: str,
         *,
         stage: SkillReleaseStage | str = SkillReleaseStage.CANARY,
+        upgrade_of_release_id: str | None = None,
+        upgrade_reason: str | None = None,
+        change_summary: str | None = None,
     ) -> SkillReleaseInfo:
         stage_value = stage.value if isinstance(stage, SkillReleaseStage) else stage
+        payload = {
+            "stage": stage_value,
+            "upgrade_of_release_id": upgrade_of_release_id,
+            "upgrade_reason": upgrade_reason,
+            "change_summary": change_summary,
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
         response = await self._http.post(
             f"/v1/skills/candidates/{candidate_id}/promote",
-            json={"stage": stage_value},
+            json=payload,
         )
         return SkillReleaseInfo.model_validate(response)
 
