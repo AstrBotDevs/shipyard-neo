@@ -80,8 +80,8 @@ Ship container is based on `python:3.13-slim-bookworm` with rich pre-installed t
 | Data Science | numpy, pandas, scikit-learn, matplotlib, seaborn |
 | Image Processing | Pillow, opencv-python-headless, imageio |
 | Document Processing | python-docx, python-pptx, openpyxl, xlrd, pypdf, pdfplumber, reportlab |
-| Web/XML | beautifulsoup4, lxml, jinja2 |
-| Utilities | tomli, pydantic |
+| Web/XML | beautifulsoup4, lxml, jinja2, requests |
+| Utilities | tomli, pydantic, tenacity, cachetools, tqdm, orjson, python-slugify |
 
 ### System Tools
 

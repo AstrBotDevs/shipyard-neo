@@ -87,8 +87,8 @@ subprocess.run(["pip", "install", "package-name"], check=True)
 | Data Science | numpy, pandas, scikit-learn, scipy, matplotlib, seaborn |
 | Image Processing | Pillow, opencv-python-headless, imageio |
 | Document Processing | python-docx, python-pptx, openpyxl, xlrd, xlsxwriter, pypdf, pdfplumber, reportlab |
-| Web/HTTP | beautifulsoup4, lxml, jinja2, httpx |
-| Utilities | pydantic, tomli, aiofiles |
+| Web/HTTP | beautifulsoup4, lxml, jinja2, httpx, requests |
+| Utilities | pydantic, tomli, aiofiles, tenacity, cachetools, tqdm, orjson, python-slugify |
 | IPython/Jupyter | ipython, ipykernel, jupyter-client |
 | Monitoring | sentry-sdk |
 
