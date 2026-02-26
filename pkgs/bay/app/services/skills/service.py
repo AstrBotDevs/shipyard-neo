@@ -1033,12 +1033,9 @@ class SkillLifecycleService:
         release = result.scalars().first()
         if release is None or release.is_deleted:
             raise NotFoundError(f"Skill release not found: {release_id}")
-        if release.is_active:
-            raise ConflictError(
-                "Active release cannot be deleted",
-                details={"release_id": release_id},
-            )
-
+        # Allow soft-deleting active releases. Deletion implicitly deactivates
+        # the release so runtime active lookup skips it.
+        release.is_active = False
         release.is_deleted = True
         release.deleted_at = utcnow()
         release.deleted_by = deleted_by

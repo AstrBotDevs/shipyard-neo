@@ -308,7 +308,7 @@ List skill releases with optional filters.
 
 ### `delete_skill_release`
 
-Soft-delete one inactive release.
+Soft-delete one release (including active release; server will deactivate it as part of soft-delete).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

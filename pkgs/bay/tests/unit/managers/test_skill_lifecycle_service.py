@@ -612,6 +612,51 @@ class TestCandidateLifecycle:
                 offset=-1,
             )
 
+    async def test_delete_active_release_soft_deletes_and_deactivates(
+        self,
+        skill_service: SkillLifecycleService,
+    ):
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.PYTHON,
+            code="print('active-delete')",
+            success=True,
+            execution_time_ms=1,
+        )
+        candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="active-delete-skill",
+            source_execution_ids=[entry.id],
+        )
+        await skill_service.evaluate_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            passed=True,
+        )
+        active_release = await skill_service.promote_candidate(
+            owner="default",
+            candidate_id=candidate.id,
+            stage=SkillReleaseStage.CANARY,
+        )
+
+        deleted = await skill_service.delete_release(
+            owner="default",
+            release_id=active_release.id,
+            deleted_by="default",
+            reason="cleanup-active",
+        )
+
+        assert deleted.is_deleted is True
+        assert deleted.is_active is False
+        assert deleted.delete_reason == "cleanup-active"
+
+        active_now = await skill_service.get_active_release(
+            owner="default",
+            skill_key="active-delete-skill",
+        )
+        assert active_now is None
+
     async def test_rollback_requires_previous_release(self, skill_service: SkillLifecycleService):
         entry = await skill_service.create_execution(
             owner="default",
