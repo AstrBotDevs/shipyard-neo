@@ -62,10 +62,12 @@ class IdleSessionGC(GCTask):
         await self._db.rollback()
 
         # Find sandboxes with expired idle timeout
+        # Exclude warm pool sandboxes (managed by WarmPoolScheduler)
         query = select(Sandbox).where(
             Sandbox.deleted_at.is_(None),
             Sandbox.idle_expires_at.is_not(None),
             Sandbox.idle_expires_at < now,
+            Sandbox.is_warm_pool.is_(False),
         )
 
         db_result = await self._db.execute(query)

@@ -180,6 +180,15 @@ class ProfileConfig(BaseModel):
     # ========== Shared configuration ==========
     idle_timeout: int = 1800  # 30 minutes
 
+    # ========== Warm pool configuration ==========
+    warm_pool_size: int = 0  # Number of pre-warmed sandbox instances (0 = disabled)
+    warm_rotate_ttl: int = 1800  # Seconds before a warm instance is rotated (>= 60)
+    warm_claim_timeout_ms: int = 200  # Max time to attempt claim before fallback (100-3000)
+    warmup_retry_max_attempts: int = 3  # Max retry on warmup failure (>= 0)
+    warmup_retry_backoff_base_ms: int = 200  # Base backoff for warmup retry
+    warmup_retry_backoff_max_ms: int = 5000  # Max backoff for warmup retry
+    warmup_circuit_breaker_threshold: int = 10  # Consecutive failures before circuit break
+
     def model_post_init(self, __context: Any) -> None:
         """Normalize single-container format to multi-container format.
 
@@ -346,6 +355,20 @@ class BrowserLearningConfig(BaseModel):
     error_rate_multiplier_threshold: float = 2.0
 
 
+class WarmPoolConfig(BaseModel):
+    """Warm pool global configuration."""
+
+    enabled: bool = True
+    # Warmup queue settings (in-process bounded queue)
+    warmup_queue_workers: int = 2  # Number of concurrent warmup workers (>= 1)
+    warmup_queue_max_size: int = 256  # Maximum queue depth (>= 1)
+    warmup_queue_drop_policy: Literal["drop_newest", "drop_oldest"] = "drop_newest"
+    warmup_queue_drop_alert_threshold: int = 50  # Alert when drops exceed this count
+    # Scheduler settings
+    interval_seconds: int = 30  # Pool maintenance interval
+    run_on_startup: bool = True  # Whether to run pool maintenance on startup
+
+
 class SecurityConfig(BaseModel):
     """Security configuration."""
 
@@ -389,6 +412,7 @@ class Settings(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     idempotency: IdempotencyConfig = Field(default_factory=IdempotencyConfig)
     gc: GCConfig = Field(default_factory=GCConfig)
+    warm_pool: WarmPoolConfig = Field(default_factory=WarmPoolConfig)
     browser_learning: BrowserLearningConfig = Field(default_factory=BrowserLearningConfig)
     browser_auto_release_enabled: bool = True
 

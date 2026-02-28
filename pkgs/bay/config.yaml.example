@@ -116,8 +116,25 @@ gc:
   orphan_container:
     enabled: false
 
+# Warm Pool — pre-start standby sandbox instances to reduce cold-start latency.
+# When a user creates a sandbox, Bay first tries to claim an available warm instance;
+# on hit the response is near-instant. On miss, falls back to normal cold create.
+warm_pool:
+  enabled: true
+  warmup_queue_workers: 2          # Concurrent warmup workers (>= 1)
+  warmup_queue_max_size: 256       # Maximum queue depth (>= 1)
+  warmup_queue_drop_policy: "drop_newest"  # drop_newest | drop_oldest
+  warmup_queue_drop_alert_threshold: 50
+  interval_seconds: 30             # Pool maintenance scan interval
+  run_on_startup: true
+
 # Runtime profiles
-# These define the available sandbox configurations
+# These define the available sandbox configurations.
+#
+# Per-profile warm pool fields:
+#   warm_pool_size: N       — number of pre-warmed instances to maintain (0 = disabled)
+#   warm_rotate_ttl: 1800   — seconds before a warm instance is rotated out
+#   warm_claim_timeout_ms: 200  — max time (ms) to attempt claim before fallback
 profiles:
   - id: python-default
     image: "ship:latest"
@@ -137,6 +154,7 @@ profiles:
       - shell
       - python
     idle_timeout: 1800  # 30 minutes
+    warm_pool_size: 1   # Keep 1 pre-warmed instance ready (0 = disable for this profile)
     env: {}
 
   - id: python-data
@@ -151,6 +169,7 @@ profiles:
       - shell
       - python
     idle_timeout: 1800
+    warm_pool_size: 1
     env: {}
 
   # Example: GPU profile (Phase 2+)
@@ -166,6 +185,7 @@ profiles:
   #     - shell
   #     - ipython
   #   idle_timeout: 3600
+  #   warm_pool_size: 0   # GPU instances are expensive; disable warm pool
   #   env:
   #     CUDA_VISIBLE_DEVICES: "0"
 
@@ -201,3 +221,4 @@ profiles:
   #         - browser
   #       env: {}
   #   idle_timeout: 1800
+  #   warm_pool_size: 1

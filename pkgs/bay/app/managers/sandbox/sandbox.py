@@ -27,7 +27,7 @@ from app.errors import (
 )
 from app.managers.cargo import CargoManager
 from app.managers.session import SessionManager
-from app.models.sandbox import Sandbox, SandboxStatus
+from app.models.sandbox import Sandbox, SandboxStatus, WarmState
 from app.models.session import Session
 from app.utils.datetime import utcnow
 
@@ -154,6 +154,32 @@ class SandboxManager:
 
         return sandbox
 
+    async def get_any(self, sandbox_id: str, owner: str) -> Sandbox:
+        """Get sandbox by ID, including soft-deleted rows.
+
+        Args:
+            sandbox_id: Sandbox ID
+            owner: Owner identifier
+
+        Returns:
+            Sandbox if found (including soft-deleted)
+
+        Raises:
+            NotFoundError: If sandbox not found
+        """
+        result = await self._db.execute(
+            select(Sandbox).where(
+                Sandbox.id == sandbox_id,
+                Sandbox.owner == owner,
+            )
+        )
+        sandbox = result.scalars().first()
+
+        if sandbox is None:
+            raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+
+        return sandbox
+
     async def list(
         self,
         owner: str,
@@ -188,6 +214,7 @@ class SandboxManager:
             query = select(Sandbox).where(
                 Sandbox.owner == owner,
                 Sandbox.deleted_at.is_(None),
+                Sandbox.is_warm_pool.is_(False),  # Exclude warm pool sandboxes
             )
 
             if scan_cursor:
@@ -237,6 +264,7 @@ class SandboxManager:
                             .where(
                                 Sandbox.owner == owner,
                                 Sandbox.deleted_at.is_(None),
+                                Sandbox.is_warm_pool.is_(False),
                                 Sandbox.id > next_cursor,
                             )
                             .order_by(Sandbox.id)
@@ -456,7 +484,13 @@ class SandboxManager:
             locked_sandbox.idle_expires_at = None
             await self._db.commit()
 
-    async def delete(self, sandbox: Sandbox) -> None:
+    async def delete(
+        self,
+        sandbox: Sandbox,
+        *,
+        delete_source: str = "unspecified",
+        request_id: str | None = None,
+    ) -> None:
         """Delete sandbox permanently.
 
         - Destroys all sessions
@@ -466,11 +500,19 @@ class SandboxManager:
 
         Args:
             sandbox: Sandbox to delete
+            delete_source: Caller/source tag for observability
+            request_id: Correlated request ID for tracing
         """
         sandbox_id = sandbox.id
         owner = sandbox.owner
         cargo_id = sandbox.cargo_id
-        self._log.info("sandbox.delete", sandbox_id=sandbox_id)
+        self._log.info(
+            "sandbox.delete",
+            sandbox_id=sandbox_id,
+            owner=owner,
+            delete_source=delete_source,
+            request_id=request_id,
+        )
 
         # Use same lock as ensure_running to prevent race conditions with GC
         sandbox_lock = await get_sandbox_lock(sandbox_id)
@@ -485,6 +527,14 @@ class SandboxManager:
 
             if locked_sandbox is None or locked_sandbox.deleted_at is not None:
                 # Already deleted, nothing to do
+                self._log.info(
+                    "sandbox.delete.noop",
+                    sandbox_id=sandbox_id,
+                    owner=owner,
+                    delete_source=delete_source,
+                    request_id=request_id,
+                    reason="already_deleted_or_missing",
+                )
                 return
 
             # Destroy all sessions
@@ -504,6 +554,14 @@ class SandboxManager:
             locked_sandbox.current_session_id = None
             await self._db.commit()
 
+            self._log.info(
+                "sandbox.delete.soft_deleted",
+                sandbox_id=sandbox_id,
+                owner=owner,
+                delete_source=delete_source,
+                request_id=request_id,
+            )
+
             # Cascade delete managed cargo
             if cargo and cargo.managed:
                 await self._cargo_mgr.delete(
@@ -512,5 +570,294 @@ class SandboxManager:
                     force=True,  # Allow deleting managed workspace
                 )
 
+                self._log.info(
+                    "sandbox.delete.cascade_cargo_deleted",
+                    sandbox_id=sandbox_id,
+                    owner=owner,
+                    cargo_id=cargo.id,
+                    delete_source=delete_source,
+                    request_id=request_id,
+                )
+
         # Cleanup in-memory lock for this sandbox (outside of lock)
         await cleanup_sandbox_lock(sandbox_id)
+
+    async def delete_by_id(
+        self,
+        *,
+        sandbox_id: str,
+        owner: str,
+        idempotent: bool = True,
+        delete_source: str = "unspecified",
+        request_id: str | None = None,
+    ) -> None:
+        """Delete sandbox by ID with optional idempotent semantics.
+
+        Args:
+            sandbox_id: Sandbox ID to delete
+            owner: Owner identifier
+            idempotent: If True, deleting an already soft-deleted sandbox is a no-op
+            delete_source: Caller/source tag for observability
+            request_id: Correlated request ID for tracing
+
+        Raises:
+            NotFoundError: If sandbox does not exist for owner; or if idempotent=False
+                and sandbox is already soft-deleted
+        """
+        sandbox = await self.get_any(sandbox_id, owner)
+
+        if sandbox.deleted_at is not None:
+            if idempotent:
+                self._log.info(
+                    "sandbox.delete_by_id.idempotent_noop",
+                    sandbox_id=sandbox_id,
+                    owner=owner,
+                    delete_source=delete_source,
+                    request_id=request_id,
+                )
+                return
+            raise NotFoundError(f"Sandbox not found: {sandbox_id}")
+
+        await self.delete(
+            sandbox,
+            delete_source=delete_source,
+            request_id=request_id,
+        )
+
+    # ==================== Warm Pool Methods ====================
+
+    async def claim_warm_sandbox(
+        self,
+        owner: str,
+        profile_id: str,
+        ttl: int | None = None,
+    ) -> Sandbox | None:
+        """Attempt to claim a warm sandbox atomically.
+
+        Uses "short transaction + conditional update" for SQLite compatibility
+        (no SELECT ... FOR UPDATE / SKIP LOCKED).
+
+        Args:
+            owner: Owner identifier for the claimed sandbox
+            profile_id: Profile ID to match
+            ttl: Time-to-live in seconds (None/0 = no expiry)
+
+        Returns:
+            Claimed sandbox if successful, None if no warm sandbox available
+        """
+        max_attempts = 3  # Retry a few times in case of concurrent claim conflict
+        now = utcnow()
+
+        for attempt in range(max_attempts):
+            # 1. Find a candidate warm sandbox
+            result = await self._db.execute(
+                select(Sandbox)
+                .where(
+                    Sandbox.deleted_at.is_(None),
+                    Sandbox.is_warm_pool.is_(True),
+                    Sandbox.warm_state == WarmState.AVAILABLE.value,
+                    Sandbox.profile_id == profile_id,
+                )
+                .order_by(Sandbox.warm_ready_at.asc())
+                .limit(1)
+            )
+            candidate = result.scalars().first()
+
+            if candidate is None:
+                return None
+
+            candidate_id = candidate.id
+
+            # 2. Atomic conditional update (claim)
+            from sqlalchemy import update
+
+            stmt = (
+                update(Sandbox)
+                .where(
+                    Sandbox.id == candidate_id,
+                    Sandbox.deleted_at.is_(None),
+                    Sandbox.is_warm_pool.is_(True),
+                    Sandbox.profile_id == profile_id,
+                    Sandbox.warm_state == WarmState.AVAILABLE.value,
+                )
+                .values(
+                    warm_state=WarmState.CLAIMED.value,
+                    warm_claimed_at=now,
+                    is_warm_pool=False,
+                    owner=owner,
+                    last_active_at=now,
+                    expires_at=(now + timedelta(seconds=ttl) if ttl and ttl > 0 else None),
+                )
+            )
+            update_result = await self._db.execute(stmt)
+            await self._db.commit()
+
+            if update_result.rowcount == 1:
+                # Claim succeeded - refetch the sandbox
+                result = await self._db.execute(
+                    select(Sandbox).where(
+                        Sandbox.id == candidate_id,
+                        Sandbox.deleted_at.is_(None),
+                    )
+                )
+                claimed = result.scalars().first()
+                if claimed is None:
+                    self._log.warning(
+                        "sandbox.warm_claim.postcheck_missing",
+                        sandbox_id=candidate_id,
+                        owner=owner,
+                        profile_id=profile_id,
+                        attempt=attempt + 1,
+                    )
+                    await self._db.rollback()
+                    continue
+
+                self._log.info(
+                    "sandbox.warm_claim.success",
+                    sandbox_id=candidate_id,
+                    owner=owner,
+                    profile_id=profile_id,
+                    attempt=attempt + 1,
+                )
+                return claimed
+
+            # Claim failed (concurrent claim), retry
+            self._log.debug(
+                "sandbox.warm_claim.conflict",
+                sandbox_id=candidate_id,
+                attempt=attempt + 1,
+            )
+            await self._db.rollback()
+
+        # All attempts failed
+        self._log.info(
+            "sandbox.warm_claim.exhausted",
+            owner=owner,
+            profile_id=profile_id,
+        )
+        return None
+
+    async def create_warm_sandbox(
+        self,
+        profile_id: str,
+        warm_rotate_ttl: int = 1800,
+        owner: str = "warm-pool",
+    ) -> Sandbox:
+        """Create a warm sandbox for the pool.
+
+        Creates a sandbox marked as warm pool with 'available' state
+        (will become available after warmup completes).
+
+        Args:
+            profile_id: Profile ID for the warm sandbox
+            warm_rotate_ttl: Seconds until rotation
+            owner: Owner scope (default "warm-pool" for global pool)
+
+        Returns:
+            Created warm sandbox (warm_state initially None, set to 'available'
+            after successful warmup by the queue worker callback)
+        """
+        sandbox_id = f"sandbox-{uuid.uuid4().hex[:12]}"
+
+        # Validate profile
+        profile = self._settings.get_profile(profile_id)
+        if profile is None:
+            raise ValidationError(f"Invalid profile: {profile_id}")
+
+        self._log.info(
+            "sandbox.create_warm",
+            sandbox_id=sandbox_id,
+            profile_id=profile_id,
+        )
+
+        # Create managed cargo
+        cargo = await self._cargo_mgr.create(
+            owner=owner,
+            managed=True,
+            managed_by_sandbox_id=sandbox_id,
+        )
+
+        now = utcnow()
+
+        # Create warm sandbox
+        sandbox = Sandbox(
+            id=sandbox_id,
+            owner=owner,
+            profile_id=profile_id,
+            cargo_id=cargo.id,
+            expires_at=None,  # Warm pool instances don't use user TTL
+            created_at=now,
+            last_active_at=now,
+            # Warm pool metadata
+            is_warm_pool=True,
+            warm_state=None,  # Will be set to 'available' after warmup
+            warm_source_profile_id=profile_id,
+        )
+
+        self._db.add(sandbox)
+        await self._db.commit()
+        await self._db.refresh(sandbox)
+
+        return sandbox
+
+    async def mark_warm_available(self, sandbox_id: str, warm_rotate_ttl: int = 1800) -> None:
+        """Mark a warm sandbox as available (warmup completed).
+
+        Called by the warmup queue worker after successful ensure_running().
+
+        Args:
+            sandbox_id: Sandbox ID to mark
+            warm_rotate_ttl: Seconds until rotation
+        """
+        now = utcnow()
+        result = await self._db.execute(
+            select(Sandbox).where(
+                Sandbox.id == sandbox_id,
+                Sandbox.is_warm_pool.is_(True),
+            )
+        )
+        sandbox = result.scalars().first()
+
+        if sandbox is None:
+            self._log.warning(
+                "sandbox.mark_warm_available.not_found",
+                sandbox_id=sandbox_id,
+            )
+            return
+
+        sandbox.warm_state = WarmState.AVAILABLE.value
+        sandbox.warm_ready_at = now
+        sandbox.warm_rotate_at = now + timedelta(seconds=warm_rotate_ttl)
+        await self._db.commit()
+
+        self._log.info(
+            "sandbox.warm_available",
+            sandbox_id=sandbox_id,
+            warm_rotate_at=sandbox.warm_rotate_at.isoformat(),
+        )
+
+    async def mark_warm_retiring(self, sandbox_id: str) -> None:
+        """Mark a warm sandbox as retiring (prevent it from being claimed).
+
+        Args:
+            sandbox_id: Sandbox ID to mark
+        """
+        result = await self._db.execute(
+            select(Sandbox).where(
+                Sandbox.id == sandbox_id,
+                Sandbox.is_warm_pool.is_(True),
+                Sandbox.warm_state == WarmState.AVAILABLE.value,
+            )
+        )
+        sandbox = result.scalars().first()
+
+        if sandbox is None:
+            return
+
+        sandbox.warm_state = WarmState.RETIRING.value
+        await self._db.commit()
+
+        self._log.info(
+            "sandbox.warm_retiring",
+            sandbox_id=sandbox_id,
+        )
