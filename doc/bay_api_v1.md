@@ -124,14 +124,22 @@ Idempotency-Key: my-unique-key-123
 POST /v1/sandboxes
 ```
 
-创建一个新的沙箱实例。采用惰性会话创建策略——沙箱创建后初始状态为 `idle`，首次执行代码时才会启动容器。
+创建一个新的沙箱实例。当前实现是“**预热优先，未命中回退普通创建**”：
 
-**请求体** ([`CreateSandboxRequest`](pkgs/bay/app/api/v1/sandboxes.py:25)):
+1. 若携带 `Idempotency-Key`，先检查幂等缓存；命中则直接返回缓存响应（不触发 claim/warmup 副作用）。
+2. 若未指定 `cargo_id`，优先尝试从 warm pool claim 可用实例。
+3. claim 成功：立即返回该 sandbox（API 响应模型不暴露 warm pool 内部字段）。
+4. claim 失败：走普通创建。
+5. 普通创建后仅投递 warmup 队列（队列不可用时回退 background task）。
+
+> 说明：API 响应语义保持稳定，`SandboxResponse` 不包含 warm pool 内部状态字段。
+
+**请求体** ([`CreateSandboxRequest`](pkgs/bay/app/api/v1/sandboxes.py:38)):
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `profile` | string | `"python-default"` | Profile ID，决定运行时能力和资源 |
-| `cargo_id` | string \| null | null | 关联已有 Cargo；null 则自动创建 |
+| `cargo_id` | string \| null | null | 关联已有 Cargo；null 则自动创建（且仅此场景尝试 warm claim） |
 | `ttl` | int \| null | null | 生存时间（秒），null/0 表示永不过期 |
 
 **请求头**:
@@ -140,7 +148,7 @@ POST /v1/sandboxes
 |--------|------|
 | `Idempotency-Key` | 可选，幂等键用于安全重试 |
 
-**响应** `201` ([`SandboxResponse`](pkgs/bay/app/api/v1/sandboxes.py:33)):
+**响应** `201` ([`SandboxResponse`](pkgs/bay/app/api/v1/sandboxes.py:57)):
 
 ```json
 {
@@ -164,6 +172,13 @@ POST /v1/sandboxes
 | `ready` | 会话已运行并就绪 |
 | `failed` | 上一次会话启动失败 |
 | `expired` | TTL 已到期 |
+
+### 1.1.1 Warm Pool 相关行为（创建链路）
+
+- warm pool 内部实例仅用于被 claim，不会作为独立资源暴露给用户 API。
+- `GET /v1/sandboxes` 默认只返回 `is_warm_pool=false` 的用户沙箱。
+- 普通创建后的 warmup 采用共享队列削峰（固定 worker + 有界队列 + 去重 + 满队列丢弃策略）。
+- 队列在进程 `lifespan` 启动/停止时统一管理；若队列不可用，会回退到 background task 执行 warmup。
 
 ### 1.2 列出沙箱
 
