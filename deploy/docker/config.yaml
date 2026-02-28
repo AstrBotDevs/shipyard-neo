@@ -50,6 +50,18 @@ security:
   api_key: "CHANGE-ME"
   allow_anonymous: false
 
+# Warm Pool — pre-start standby sandbox instances to reduce cold-start latency.
+# When a user creates a sandbox, Bay will first try to claim an available warm instance,
+# delivering near-instant startup instead of waiting for container boot.
+warm_pool:
+  enabled: true
+  warmup_queue_workers: 2          # Concurrent warmup workers
+  warmup_queue_max_size: 256       # Maximum queue depth
+  warmup_queue_drop_policy: "drop_newest"
+  warmup_queue_drop_alert_threshold: 50
+  interval_seconds: 30             # Pool maintenance scan interval
+  run_on_startup: true
+
 profiles:
   # ── Standard Python sandbox ────────────────────────
   - id: python-default
@@ -65,6 +77,7 @@ profiles:
       - shell
       - python
     idle_timeout: 1800  # 30 minutes
+    warm_pool_size: 1   # Keep 1 pre-warmed instance ready
     env: {}
 
   # ── Data Science sandbox (more resources) ──────────
@@ -81,6 +94,7 @@ profiles:
       - shell
       - python
     idle_timeout: 1800
+    warm_pool_size: 1
     env: {}
 
   # ── Browser + Python multi-container sandbox ───────
@@ -114,6 +128,7 @@ profiles:
           - browser
         env: {}
     idle_timeout: 1800
+    warm_pool_size: 1
 
 gc:
   # Enable automatic GC for production

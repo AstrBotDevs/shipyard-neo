@@ -49,6 +49,7 @@ profiles:
       - shell
       - python
     idle_timeout: 300  # Shorter timeout for tests
+    warm_pool_size: 1
     env: {}
 
   # Restricted profile for capability enforcement testing
@@ -62,6 +63,7 @@ profiles:
     capabilities:
       - python  # Only python - no shell/filesystem access
     idle_timeout: 300
+    warm_pool_size: 1
     env: {}
 
   # Profile with very short idle_timeout for GC testing
@@ -78,6 +80,7 @@ profiles:
       - shell
       - python
     idle_timeout: 2  # Very short - 2 seconds for quick GC testing
+    warm_pool_size: 1
     env: {}
 
   # Profile with strict memory limit for OOM testing (Phase 1.5)
@@ -94,6 +97,7 @@ profiles:
       - shell
       - python
     idle_timeout: 300
+    warm_pool_size: 1
     env: {}
 
   # Multi-container profile for Browser + Python (Phase 2)
@@ -128,6 +132,18 @@ profiles:
           - browser
         env: {}
     idle_timeout: 300
+    warm_pool_size: 1
+
+warm_pool:
+  # Warm pool defaults for docker-host E2E.
+  # If per-profile warm_pool_size is omitted or 0, no pre-warm claim will happen.
+  enabled: true
+  warmup_queue_workers: 2
+  warmup_queue_max_size: 64
+  warmup_queue_drop_policy: "drop_newest"
+  warmup_queue_drop_alert_threshold: 10
+  interval_seconds: 30
+  run_on_startup: true
 
 gc:
   # Disable automatic GC during E2E tests.

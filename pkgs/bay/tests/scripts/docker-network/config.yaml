@@ -52,6 +52,7 @@ profiles:
       - upload
       - download
     idle_timeout: 300  # Shorter timeout for tests
+    warm_pool_size: 1  # Keep 1 pre-warmed instance ready
     env: {}
 
   # Restricted profile for capability enforcement testing
@@ -65,6 +66,7 @@ profiles:
     capabilities:
       - python  # Only python - no shell/filesystem access
     idle_timeout: 300
+    warm_pool_size: 1
     env: {}
 
   # Profile with very short idle_timeout for GC testing
@@ -81,6 +83,7 @@ profiles:
       - shell
       - python
     idle_timeout: 2  # Very short - 2 seconds for quick GC testing
+    warm_pool_size: 1
     env: {}
 
   # Profile with strict memory limit for OOM testing (Phase 1.5)
@@ -97,6 +100,7 @@ profiles:
       - shell
       - python
     idle_timeout: 300
+    warm_pool_size: 1
     env: {}
 
   # Multi-container profile for Browser + Python (Phase 2)
@@ -131,6 +135,19 @@ profiles:
           - browser
         env: {}
     idle_timeout: 300
+    warm_pool_size: 1
+
+warm_pool:
+  # Warm pool: pre-start standby sandbox instances to reduce cold-start latency.
+  # Disabled by default for E2E tests (profiles use warm_pool_size: 0).
+  # To test warm pool, set warm_pool_size > 0 on a profile.
+  enabled: true
+  warmup_queue_workers: 2        # Concurrent warmup workers
+  warmup_queue_max_size: 64      # Maximum queue depth
+  warmup_queue_drop_policy: "drop_newest"
+  warmup_queue_drop_alert_threshold: 10
+  interval_seconds: 30           # Pool maintenance scan interval
+  run_on_startup: true
 
 gc:
   # Disable automatic GC during E2E tests.

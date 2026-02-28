@@ -19,6 +19,7 @@ from app.services.skills.lifecycle import (
     init_browser_learning_scheduler,
     shutdown_browser_learning_scheduler,
 )
+from app.services.warm_pool.lifecycle import init_warm_pool, shutdown_warm_pool
 
 logger = structlog.get_logger()
 
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI):
     await init_gc_scheduler()
     await init_browser_learning_scheduler()
 
+    # Initialize warm pool (queue + scheduler)
+    await init_warm_pool()
+
     yield
 
     # Shutdown
@@ -54,6 +58,9 @@ async def lifespan(app: FastAPI):
     # Stop GC scheduler
     await shutdown_gc_scheduler()
     await shutdown_browser_learning_scheduler()
+
+    # Stop warm pool
+    await shutdown_warm_pool()
 
     # Close HTTP client
     await http_client_manager.shutdown()

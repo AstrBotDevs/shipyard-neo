@@ -30,6 +30,14 @@ class SandboxStatus(str, Enum):
     DELETED = "deleted"  # Soft-deleted (internal only)
 
 
+class WarmState(str, Enum):
+    """Warm pool sandbox state."""
+
+    AVAILABLE = "available"  # Ready to be claimed
+    CLAIMED = "claimed"  # Claimed by a user request
+    RETIRING = "retiring"  # Being rotated out
+
+
 class Sandbox(SQLModel, table=True):
     """Sandbox - external-facing resource."""
 
@@ -63,6 +71,14 @@ class Sandbox(SQLModel, table=True):
     # Timestamps
     created_at: datetime = Field(default_factory=utcnow)
     last_active_at: datetime = Field(default_factory=utcnow)
+
+    # Warm pool metadata
+    is_warm_pool: bool = Field(default=False)
+    warm_state: Optional[str] = Field(default=None)  # available / claimed / retiring
+    warm_ready_at: Optional[datetime] = Field(default=None)  # When warmup completed
+    warm_rotate_at: Optional[datetime] = Field(default=None)  # When to rotate this instance
+    warm_claimed_at: Optional[datetime] = Field(default=None)  # When claimed by user
+    warm_source_profile_id: Optional[str] = Field(default=None)  # Profile used for warm pool
 
     # Relationships
     cargo: "Cargo" = Relationship(back_populates="sandboxes")

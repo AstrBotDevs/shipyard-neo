@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Header, Query
+from fastapi import APIRouter, BackgroundTasks, Header, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -332,12 +332,13 @@ async def create_sandbox(
     - Lazy session creation: status may be 'idle' initially
     - ttl=null or ttl=0 means no expiry
     - Supports Idempotency-Key header for safe retries
+    - Prioritizes claiming a warm pool sandbox if available (§6.1)
     """
     # Serialize request body for fingerprinting
     request_body = request.model_dump_json()
     request_path = "/v1/sandboxes"
 
-    # 1. Check idempotency key if provided
+    # 1. Check idempotency key if provided (must be BEFORE claim, §6.1 step 2)
     if idempotency_key:
         cached = await idempotency_svc.check(
             owner=owner,
@@ -348,12 +349,50 @@ async def create_sandbox(
         )
         if cached:
             # Return cached response with original status code
+            # Do NOT trigger claim/warmup side effects (§11.1)
             return JSONResponse(
                 content=cached.response,
                 status_code=cached.status_code,
             )
 
-    # 2. Create sandbox
+    # 2. Try to claim a warm sandbox (§6.1 step 3)
+    #    Skip claim when user specifies a cargo_id (warm sandbox has its own cargo)
+    sandbox = None
+    if request.cargo_id is None:
+        sandbox = await sandbox_mgr.claim_warm_sandbox(
+            owner=owner,
+            profile_id=request.profile,
+            ttl=request.ttl,
+        )
+
+    if sandbox is not None:
+        # Claim succeeded - return immediately (already warm/running)
+        _log.info(
+            "sandbox.create.warm_claim_hit",
+            sandbox_id=sandbox.id,
+            profile=request.profile,
+        )
+        response = _sandbox_to_response(sandbox)
+
+        # Save idempotency key if provided
+        if idempotency_key:
+            await idempotency_svc.save(
+                owner=owner,
+                key=idempotency_key,
+                path=request_path,
+                method="POST",
+                body=request_body,
+                response=response,
+                status_code=201,
+            )
+
+        return response
+
+    # 3. Claim miss - fall back to normal create
+    _log.debug(
+        "sandbox.create.warm_claim_miss",
+        profile=request.profile,
+    )
     sandbox = await sandbox_mgr.create(
         owner=owner,
         profile_id=request.profile,
@@ -362,7 +401,7 @@ async def create_sandbox(
     )
     response = _sandbox_to_response(sandbox)
 
-    # 3. Save idempotency key if provided
+    # 4. Save idempotency key if provided
     if idempotency_key:
         await idempotency_svc.save(
             owner=owner,
@@ -374,13 +413,19 @@ async def create_sandbox(
             status_code=201,
         )
 
-    # 4. Enqueue warmup hook. The hook itself detaches actual warmup work,
-    # so this does not block request completion on keep-alive connections.
-    background_tasks.add_task(
-        _warmup_sandbox_runtime,
-        sandbox_id=sandbox.id,
-        owner=owner,
-    )
+    # 5. Enqueue warmup via queue (§2.5.1: only enqueue, never execute directly)
+    from app.services.warm_pool.lifecycle import get_warmup_queue
+
+    warmup_queue = get_warmup_queue()
+    if warmup_queue is not None and warmup_queue.is_running:
+        warmup_queue.enqueue(sandbox_id=sandbox.id, owner=owner)
+    else:
+        # Fallback: if queue not available, use background task
+        background_tasks.add_task(
+            _warmup_sandbox_runtime,
+            sandbox_id=sandbox.id,
+            owner=owner,
+        )
 
     return response
 
@@ -537,14 +582,29 @@ async def stop_sandbox(
 @router.delete("/{sandbox_id}", status_code=204)
 async def delete_sandbox(
     sandbox_id: str,
+    request: Request,
     sandbox_mgr: SandboxManagerDep,
     owner: AuthDep,
 ) -> None:
-    """Delete sandbox permanently.
+    """Delete sandbox permanently (idempotent).
 
     - Destroys all running sessions
     - Cascade deletes managed cargo
     - Does NOT cascade delete external cargo
+    - If sandbox already soft-deleted, returns 204 (idempotent)
     """
-    sandbox = await sandbox_mgr.get(sandbox_id, owner)
-    await sandbox_mgr.delete(sandbox)
+    request_id = getattr(request.state, "request_id", None)
+    _log.info(
+        "sandbox.delete.request",
+        sandbox_id=sandbox_id,
+        owner=owner,
+        request_id=request_id,
+        delete_source="api.v1.sandboxes.delete",
+    )
+    await sandbox_mgr.delete_by_id(
+        sandbox_id=sandbox_id,
+        owner=owner,
+        idempotent=True,
+        delete_source="api.v1.sandboxes.delete",
+        request_id=request_id,
+    )

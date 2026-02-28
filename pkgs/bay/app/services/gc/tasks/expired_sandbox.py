@@ -65,10 +65,13 @@ class ExpiredSandboxGC(GCTask):
         await self._db.rollback()
 
         # Find sandboxes with expired TTL
+        # Exclude warm pool sandboxes (§6.4 scheme A):
+        # warm pool instances are managed by WarmPoolScheduler, not GC
         query = select(Sandbox).where(
             Sandbox.deleted_at.is_(None),
             Sandbox.expires_at.is_not(None),
             Sandbox.expires_at < now,
+            Sandbox.is_warm_pool.is_(False),
         )
 
         db_result = await self._db.execute(query)
@@ -133,6 +136,7 @@ class ExpiredSandboxGC(GCTask):
                 "gc.expired_sandbox.deleting",
                 sandbox_id=sandbox_id,
                 expires_at=sandbox.expires_at.isoformat(),
+                delete_source="gc.expired_sandbox",
             )
 
             # Destroy all sessions for this sandbox
@@ -178,6 +182,7 @@ class ExpiredSandboxGC(GCTask):
                 "gc.expired_sandbox.deleted",
                 sandbox_id=sandbox_id,
                 sessions_destroyed=len(sessions),
+                delete_source="gc.expired_sandbox",
             )
 
         # Cleanup lock outside of lock context

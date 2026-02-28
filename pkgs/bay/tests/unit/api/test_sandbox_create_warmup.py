@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import BackgroundTasks
@@ -20,6 +20,8 @@ async def test_create_sandbox_schedules_background_warmup_when_created():
     background_tasks = BackgroundTasks()
 
     sandbox_mgr = AsyncMock()
+    # No warm sandbox available → claim miss → falls back to create
+    sandbox_mgr.claim_warm_sandbox.return_value = None
     sandbox_mgr.create.return_value = Sandbox(
         id="sandbox-abc123",
         owner="user-1",
@@ -30,14 +32,19 @@ async def test_create_sandbox_schedules_background_warmup_when_created():
     idempotency_svc = AsyncMock()
     idempotency_svc.check.return_value = None
 
-    resp = await create_sandbox(
-        request=request,
-        background_tasks=background_tasks,
-        sandbox_mgr=sandbox_mgr,
-        idempotency_svc=idempotency_svc,
-        owner="user-1",
-        idempotency_key=None,
-    )
+    # Patch the warmup queue as unavailable so it falls back to background task
+    with patch(
+        "app.services.warm_pool.lifecycle.get_warmup_queue",
+        return_value=None,
+    ):
+        resp = await create_sandbox(
+            request=request,
+            background_tasks=background_tasks,
+            sandbox_mgr=sandbox_mgr,
+            idempotency_svc=idempotency_svc,
+            owner="user-1",
+            idempotency_key=None,
+        )
 
     assert resp.id == "sandbox-abc123"
     assert len(background_tasks.tasks) == 1
@@ -81,6 +88,8 @@ async def test_create_sandbox_with_idempotency_save_and_enqueue_warmup():
     background_tasks = BackgroundTasks()
 
     sandbox_mgr = AsyncMock()
+    # No warm sandbox available → claim miss → falls back to create
+    sandbox_mgr.claim_warm_sandbox.return_value = None
     sandbox_mgr.create.return_value = Sandbox(
         id="sandbox-new-idem",
         owner="user-1",
@@ -91,14 +100,19 @@ async def test_create_sandbox_with_idempotency_save_and_enqueue_warmup():
     idempotency_svc = AsyncMock()
     idempotency_svc.check.return_value = None
 
-    resp = await create_sandbox(
-        request=request,
-        background_tasks=background_tasks,
-        sandbox_mgr=sandbox_mgr,
-        idempotency_svc=idempotency_svc,
-        owner="user-1",
-        idempotency_key="idem-key-2",
-    )
+    # Patch the warmup queue as unavailable so it falls back to background task
+    with patch(
+        "app.services.warm_pool.lifecycle.get_warmup_queue",
+        return_value=None,
+    ):
+        resp = await create_sandbox(
+            request=request,
+            background_tasks=background_tasks,
+            sandbox_mgr=sandbox_mgr,
+            idempotency_svc=idempotency_svc,
+            owner="user-1",
+            idempotency_key="idem-key-2",
+        )
 
     assert resp.id == "sandbox-new-idem"
     idempotency_svc.save.assert_awaited_once()
