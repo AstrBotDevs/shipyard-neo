@@ -41,8 +41,8 @@ class SkillCandidateResponse(BaseModel):
     auto_release_reason: str | None
     summary: str | None
     usage_notes: str | None
-    preconditions: dict[str, Any] | None
-    postconditions: dict[str, Any] | None
+    preconditions: list[str] | dict[str, Any] | None
+    postconditions: list[str] | dict[str, Any] | None
     source_execution_ids: list[str]
     status: str
     latest_score: float | None
@@ -237,14 +237,23 @@ class SkillDeleteResponse(BaseModel):
     delete_reason: str | None
 
 
-def _json_field_to_obj(raw: str | None) -> dict[str, Any] | None:
+def _json_field_to_obj(raw: str | None) -> list[str] | dict[str, Any] | None:
+    """Deserialize a pre/postconditions JSON field.
+
+    Accepts both list (evolution-generated) and dict (API-created) formats.
+    Returns None on missing or unparseable input.
+    """
     if raw is None:
         return None
     try:
         parsed = json.loads(raw)
     except Exception:
         return None
-    return parsed if isinstance(parsed, dict) else None
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, dict):
+        return parsed
+    return None
 
 
 def _candidate_to_response(candidate) -> SkillCandidateResponse:

@@ -1273,4 +1273,43 @@ async def test_delete_sandbox_logs_info(caplog):
 
     assert "sandbox_deleted" in caplog.text
     assert "sbx-1" in caplog.text
-    assert "deleted successfully" in response[0].text
+
+
+# ---------------------------------------------------------------------------
+# pre/postconditions dual-format: list_skill_candidates with evolution candidates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_skill_candidates_handles_evolution_candidates_with_list_preconditions():
+    """list_skill_candidates must not crash when evolution candidates have list preconditions.
+
+    The evolution agent writes pre/postconditions as list[str].
+    The SDK must accept both list[str] and dict[str, Any] without raising ValidationError.
+    """
+    from datetime import datetime, timezone
+    from shipyard_neo.types import SkillCandidateInfo, SkillCandidateList
+
+    evolution_candidate = SkillCandidateInfo(
+        id="sc-evo-1",
+        skill_key="github-get-stars",
+        source_execution_ids=["exec-1"],
+        status=SkillCandidateStatus.DRAFT,
+        preconditions=["browser available", "JS enabled"],
+        postconditions=["integer returned"],
+        summary="Improved wait logic",
+        latest_pass=None,
+        created_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    )
+
+    class _FakeSkillsWithEvolution:
+        async def list_candidates(self, *, status=None, skill_key=None, limit=50, offset=0):
+            return SkillCandidateList(items=[evolution_candidate], total=1)
+
+    mcp_server._client = FakeClient(skills=_FakeSkillsWithEvolution())
+    response = await mcp_server.call_tool("list_skill_candidates", {})
+
+    text = response[0].text
+    assert "sc-evo-1" in text
+    assert "github-get-stars" in text

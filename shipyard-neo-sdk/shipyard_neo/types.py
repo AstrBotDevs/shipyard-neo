@@ -275,8 +275,8 @@ class SkillCandidateInfo(BaseModel):
     auto_release_reason: str | None = None
     summary: str | None = None
     usage_notes: str | None = None
-    preconditions: dict[str, Any] | None = None
-    postconditions: dict[str, Any] | None = None
+    preconditions: list[str] | dict[str, Any] | None = None
+    postconditions: list[str] | dict[str, Any] | None = None
     source_execution_ids: list[str]
     status: SkillCandidateStatus
     latest_score: float | None = None
