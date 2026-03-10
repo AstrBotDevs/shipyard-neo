@@ -27,6 +27,7 @@ from app.errors import (
 )
 from app.managers.cargo import CargoManager
 from app.managers.session import SessionManager
+from app.models.cargo import Cargo
 from app.models.sandbox import Sandbox, SandboxStatus, WarmState
 from app.models.session import Session
 from app.utils.datetime import utcnow
@@ -712,12 +713,23 @@ class SandboxManager:
                     await self._db.rollback()
                     continue
 
+                # Transfer managed cargo ownership to the claiming user.
+                # Otherwise /v1/cargos?managed=true cannot see claimed warm cargos.
+                cargo_result = await self._db.execute(
+                    select(Cargo).where(Cargo.id == claimed.cargo_id)
+                )
+                cargo = cargo_result.scalars().first()
+                if cargo is not None:
+                    cargo.owner = owner
+                    await self._db.commit()
+
                 self._log.info(
                     "sandbox.warm_claim.success",
                     sandbox_id=candidate_id,
                     owner=owner,
                     profile_id=profile_id,
                     attempt=attempt + 1,
+                    cargo_id=claimed.cargo_id,
                 )
                 return claimed
 
