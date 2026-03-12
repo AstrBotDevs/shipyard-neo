@@ -589,3 +589,36 @@ class TestSkillsManagerAndHistory:
             result = await client.skills.list_candidates()
         assert result.total == 1
         assert result.items[0].preconditions == ["browser available"]
+
+    @pytest.mark.asyncio
+    async def test_create_candidate_accepts_list_preconditions(self, httpx_mock):
+        """create_candidate should pass list[str] conditions through unchanged."""
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8000/v1/skills/candidates",
+            json=self._candidate_payload(
+                preconditions=["browser available", "JS enabled"],
+                postconditions=["integer returned"],
+            ),
+            status_code=201,
+        )
+
+        async with BayClient(
+            endpoint_url="http://localhost:8000",
+            access_token="test-token",
+        ) as client:
+            candidate = await client.skills.create_candidate(
+                skill_key="github-get-stars",
+                source_execution_ids=["exec-1"],
+                preconditions=["browser available", "JS enabled"],
+                postconditions=["integer returned"],
+            )
+
+        request = httpx_mock.get_requests()[0]
+        assert request.read().decode() == (
+            '{"skill_key":"github-get-stars","source_execution_ids":["exec-1"],'
+            '"preconditions":["browser available","JS enabled"],'
+            '"postconditions":["integer returned"]}'
+        )
+        assert candidate.preconditions == ["browser available", "JS enabled"]
+        assert candidate.postconditions == ["integer returned"]

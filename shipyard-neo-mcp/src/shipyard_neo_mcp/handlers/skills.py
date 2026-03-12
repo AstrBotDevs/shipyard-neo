@@ -14,6 +14,7 @@ from shipyard_neo_mcp.validators import (
     optional_str,
     read_bool,
     read_int,
+    read_optional_conditions,
     read_optional_number,
     read_release_stage,
     require_str,
@@ -77,16 +78,8 @@ async def handle_create_skill_candidate(
             payload_ref=optional_str(arguments, "payload_ref"),
             summary=optional_str(arguments, "summary"),
             usage_notes=optional_str(arguments, "usage_notes"),
-            preconditions=(
-                arguments.get("preconditions")
-                if isinstance(arguments.get("preconditions"), dict)
-                else None
-            ),
-            postconditions=(
-                arguments.get("postconditions")
-                if isinstance(arguments.get("postconditions"), dict)
-                else None
-            ),
+            preconditions=read_optional_conditions(arguments, "preconditions"),
+            postconditions=read_optional_conditions(arguments, "postconditions"),
         )
     return [
         TextContent(

@@ -237,6 +237,7 @@ class FakeSandbox:
 class FakeSkills:
     def __init__(self) -> None:
         self.last_promote_stage: str | None = None
+        self.last_create_candidate_args: dict[str, object] | None = None
 
     async def create_payload(
         self,
@@ -263,17 +264,19 @@ class FakeSkills:
         payload_ref: str | None = None,
         summary: str | None = None,
         usage_notes: str | None = None,
-        preconditions: dict | None = None,
-        postconditions: dict | None = None,
+        preconditions: list[str] | dict | None = None,
+        postconditions: list[str] | dict | None = None,
     ):
-        _ = (
-            scenario_key,
-            payload_ref,
-            summary,
-            usage_notes,
-            preconditions,
-            postconditions,
-        )
+        self.last_create_candidate_args = {
+            "skill_key": skill_key,
+            "source_execution_ids": source_execution_ids,
+            "scenario_key": scenario_key,
+            "payload_ref": payload_ref,
+            "summary": summary,
+            "usage_notes": usage_notes,
+            "preconditions": preconditions,
+            "postconditions": postconditions,
+        }
         return SimpleNamespace(
             id="sc-1",
             skill_key=skill_key,
@@ -438,6 +441,21 @@ async def test_list_tools_contains_history_and_skill_tools():
 
 
 @pytest.mark.asyncio
+async def test_create_skill_candidate_schema_accepts_list_conditions():
+    tools = await mcp_server.list_tools()
+    candidate_tool = next(tool for tool in tools if tool.name == "create_skill_candidate")
+
+    preconditions_schema = candidate_tool.inputSchema["properties"]["preconditions"]
+    postconditions_schema = candidate_tool.inputSchema["properties"]["postconditions"]
+
+    assert preconditions_schema["anyOf"][1] == {"type": "array", "items": {"type": "string"}}
+    assert postconditions_schema["anyOf"][1] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_call_tool_requires_initialized_client():
     response = await mcp_server.call_tool("unknown", {})
     assert len(response) == 1
@@ -523,6 +541,29 @@ async def test_create_skill_candidate_tool_calls_sdk_manager():
     assert "Created skill candidate sc-1" in text
     assert "status: draft" in text
     assert "source_execution_ids: exec-1, exec-2" in text
+
+
+@pytest.mark.asyncio
+async def test_create_skill_candidate_tool_accepts_list_conditions():
+    skills = FakeSkills()
+    mcp_server._client = FakeClient(skills=skills)
+
+    await mcp_server.call_tool(
+        "create_skill_candidate",
+        {
+            "skill_key": "browser-login",
+            "source_execution_ids": ["exec-1"],
+            "preconditions": ["browser available", "user authenticated"],
+            "postconditions": ["dashboard visible"],
+        },
+    )
+
+    assert skills.last_create_candidate_args is not None
+    assert skills.last_create_candidate_args["preconditions"] == [
+        "browser available",
+        "user authenticated",
+    ]
+    assert skills.last_create_candidate_args["postconditions"] == ["dashboard visible"]
 
 
 @pytest.mark.asyncio
@@ -1269,7 +1310,7 @@ async def test_delete_sandbox_logs_info(caplog):
     mcp_server._client = FakeClient()
 
     with caplog.at_level(logging.INFO, logger="shipyard_neo_mcp"):
-        response = await mcp_server.call_tool("delete_sandbox", {"sandbox_id": "sbx-1"})
+        await mcp_server.call_tool("delete_sandbox", {"sandbox_id": "sbx-1"})
 
     assert "sandbox_deleted" in caplog.text
     assert "sbx-1" in caplog.text

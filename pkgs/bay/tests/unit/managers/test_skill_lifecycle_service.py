@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -335,6 +337,32 @@ class TestCandidateLifecycle:
                 skill_key="loader",
                 source_execution_ids=["exec-missing"],
             )
+
+    async def test_create_candidate_persists_list_conditions(
+        self, skill_service: SkillLifecycleService
+    ):
+        entry = await skill_service.create_execution(
+            owner="default",
+            sandbox_id="sandbox-1",
+            exec_type=ExecutionType.SHELL,
+            code="echo ok",
+            success=True,
+            execution_time_ms=1,
+        )
+
+        candidate = await skill_service.create_candidate(
+            owner="default",
+            skill_key="browser-skill",
+            source_execution_ids=[entry.id],
+            preconditions=["browser available", "js enabled"],
+            postconditions=["integer returned"],
+        )
+
+        assert json.loads(candidate.preconditions_json or "null") == [
+            "browser available",
+            "js enabled",
+        ]
+        assert json.loads(candidate.postconditions_json or "null") == ["integer returned"]
 
     async def test_promote_requires_passing_evaluation(self, skill_service: SkillLifecycleService):
         entry = await skill_service.create_execution(

@@ -10,20 +10,18 @@ Uses fake service objects — no DB or HTTP involved.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from app.api.v1.skills import (
     SkillActiveResponse,
+    SkillCandidateCreateRequest,
     SkillGoalDeclareRequest,
     SkillOutcomeRequest,
     declare_skill_goal,
     get_active_skill,
     report_skill_outcome,
 )
-from app.errors import NotFoundError, ValidationError
-
+from app.errors import NotFoundError
 
 # ---------------------------------------------------------------------------
 # Fake service
@@ -133,6 +131,18 @@ class TestDeclareSkillGoal:
         call = svc.declare_goal_calls[0]
         assert call["skill_key"] == "my-skill"
         assert call["goal"] == "My goal."
+
+
+def test_skill_candidate_create_request_accepts_list_conditions():
+    request = SkillCandidateCreateRequest(
+        skill_key="browser-login",
+        source_execution_ids=["exec-1"],
+        preconditions=["browser available", "user authenticated"],
+        postconditions=["dashboard visible"],
+    )
+
+    assert request.preconditions == ["browser available", "user authenticated"]
+    assert request.postconditions == ["dashboard visible"]
 
 
 # ---------------------------------------------------------------------------

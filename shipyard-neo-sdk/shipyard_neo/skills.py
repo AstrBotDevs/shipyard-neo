@@ -74,8 +74,8 @@ class SkillManager:
         payload_ref: str | None = None,
         summary: str | None = None,
         usage_notes: str | None = None,
-        preconditions: dict[str, Any] | None = None,
-        postconditions: dict[str, Any] | None = None,
+        preconditions: list[str] | dict[str, Any] | None = None,
+        postconditions: list[str] | dict[str, Any] | None = None,
     ) -> SkillCandidateInfo:
         body = {
             "skill_key": skill_key,

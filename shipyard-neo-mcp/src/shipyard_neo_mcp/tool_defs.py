@@ -338,12 +338,22 @@ def get_tool_definitions() -> list[Tool]:
                         "description": "Optional usage notes for operators/agents.",
                     },
                     "preconditions": {
-                        "type": "object",
-                        "description": "Optional JSON object describing preconditions.",
+                        "anyOf": [
+                            {"type": "object"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": (
+                            "Optional JSON object or string array describing preconditions."
+                        ),
                     },
                     "postconditions": {
-                        "type": "object",
-                        "description": "Optional JSON object describing postconditions.",
+                        "anyOf": [
+                            {"type": "object"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": (
+                            "Optional JSON object or string array describing postconditions."
+                        ),
                     },
                 },
                 "required": ["skill_key", "source_execution_ids"],
