@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, cast
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from shipyard_neo.types import (
     GoalDeclaration,

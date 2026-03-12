@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
     # Initialize warm pool (queue + scheduler)
     await init_warm_pool()
 
+    # Initialize warm pool (queue + scheduler)
+    await init_warm_pool()
+
     yield
 
     # Shutdown
@@ -64,6 +67,9 @@ async def lifespan(app: FastAPI):
     await shutdown_gc_scheduler()
     await shutdown_browser_learning_scheduler()
     await shutdown_evolution_scheduler()
+
+    # Stop warm pool
+    await shutdown_warm_pool()
 
     # Stop warm pool
     await shutdown_warm_pool()

@@ -149,12 +149,10 @@ class SkillCandidate(SQLModel, table=True):
     last_evaluated_at: datetime | None = Field(default=None)
 
     promotion_release_id: str | None = Field(default=None, index=True)
-
     # Evolution lineage (Phase 2)
     evolution_parent_id: str | None = Field(default=None, index=True)
     evolution_meta_prompt_id: str | None = Field(default=None, index=True)
     mutation_reasoning: str | None = Field(default=None)
-
     deleted_at: datetime | None = Field(default=None, index=True)
     deleted_by: str | None = Field(default=None)
     delete_reason: str | None = Field(default=None)
