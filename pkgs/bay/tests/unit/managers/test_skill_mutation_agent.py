@@ -573,3 +573,42 @@ class TestSkillMutationAgent:
         assert evaluator.call_count == 1
         assert evaluator.last_kwargs["rubric"] is not None
         assert rubric_gen.call_count >= 1
+
+    async def test_mutate_backfills_rubric_summary_from_cached_rubric_json(
+        self,
+        db_session: AsyncSession,
+        skill_svc: SkillLifecycleService,
+        meta_svc: MetaPromptService,
+    ):
+        """Legacy cached rubrics should self-heal rubric_summary on read."""
+        await meta_svc.seed_defaults()
+        _, release = await _setup_skill_with_release(skill_svc)
+        await _add_failure_outcomes(skill_svc, release_id=release.id)
+        goal = await skill_svc.declare_goal(
+            owner="default",
+            skill_key="github-get-stars",
+            goal="Return star count.",
+        )
+        goal.rubric_json = (
+            '{"summary":"Cached rubric summary","success_criteria":["Returns an integer"],'
+            '"failure_indicators":["Returns None"],"evaluation_focus":"Selector robustness."}'
+        )
+        goal.rubric_summary = ""
+        db_session.add(goal)
+        await db_session.commit()
+
+        rubric_gen = _FakeRubricGenerator()
+        evaluator = _FakeEvaluator(EvaluationResult(passed=True, score=0.9, reasoning="Good."))
+        agent = self._make_agent(db_session, evaluator=evaluator, rubric_generator=rubric_gen)
+        await agent.mutate(owner="default", skill_key="github-get-stars")
+
+        updated_goal = await skill_svc.get_skill_goal(
+            owner="default",
+            skill_key="github-get-stars",
+        )
+        assert evaluator.call_count == 1
+        assert evaluator.last_kwargs["rubric"] is not None
+        assert evaluator.last_kwargs["rubric"].summary == "Cached rubric summary"
+        assert updated_goal is not None
+        assert updated_goal.rubric_summary == "Cached rubric summary"
+        assert rubric_gen.call_count == 0

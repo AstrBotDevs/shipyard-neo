@@ -213,7 +213,14 @@ class SkillMutationAgent:
         """Return the cached rubric from SkillGoal, or generate+persist a new one."""
         if skill_goal.rubric_json:
             try:
-                return SkillRubric.model_validate_json(skill_goal.rubric_json)
+                rubric = SkillRubric.model_validate_json(skill_goal.rubric_json)
+                # Backfill legacy rows that cached rubric_json before rubric_summary
+                # started being persisted alongside it.
+                if not skill_goal.rubric_summary:
+                    skill_goal.rubric_summary = rubric.summary
+                    skill_goal.updated_at = utcnow()
+                    await self._db.commit()
+                return rubric
             except Exception:
                 pass  # regenerate if cached JSON is malformed
 
