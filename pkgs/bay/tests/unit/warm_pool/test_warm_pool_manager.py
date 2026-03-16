@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 
 from app.drivers.base import ContainerInfo, ContainerStatus, RuntimeInstance
 from app.managers.sandbox import SandboxManager
@@ -98,8 +98,6 @@ class TestMarkWarmAvailable:
             await sandbox_mgr.mark_warm_available(sandbox.id, warm_rotate_ttl=1800)
 
         # Refetch
-        from sqlmodel import select
-
         result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
         updated = result.scalars().first()
 
@@ -229,8 +227,6 @@ class TestMarkWarmRetiring:
 
         await sandbox_mgr.mark_warm_retiring(sandbox.id)
 
-        from sqlmodel import select
-
         result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
         updated = result.scalars().first()
         assert updated.warm_state == WarmState.RETIRING.value
@@ -251,8 +247,6 @@ class TestMarkWarmRetiring:
         await sandbox_mgr.mark_warm_retiring(sandbox.id)
 
         # Verify state is still claimed
-        from sqlmodel import select
-
         result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
         updated = result.scalars().first()
         assert updated.warm_state == WarmState.CLAIMED.value
@@ -349,8 +343,6 @@ class TestWarmPoolSchedulerReconcile:
         assert reconciled == 1
         assert queue.enqueued == [(sandbox.id, sandbox.owner)]
 
-        from sqlmodel import select
-
         sandbox_result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
         updated_sandbox = sandbox_result.scalars().first()
         assert updated_sandbox is not None
@@ -441,8 +433,6 @@ class TestWarmPoolSchedulerReconcile:
         reconciled = await scheduler._reconcile_profile_runtime_state("python-default")
         assert reconciled == 0
         assert queue.enqueued == []
-
-        from sqlmodel import select
 
         sandbox_result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
         updated_sandbox = sandbox_result.scalars().first()
