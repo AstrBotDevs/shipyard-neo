@@ -57,6 +57,30 @@ async def ensure_kernel_running(km: AsyncKernelManager):
         await _init_kernel_matplotlib(km)
 
 
+def _load_env_file() -> dict[str, str]:
+    """从 .bay_env.sh 加载环境变量"""
+    env_file = WORKSPACE_ROOT / ".bay_env.sh"
+    if not env_file.exists():
+        return {}
+
+    env_vars = {}
+    try:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[7:]  # 去掉 "export "
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    # 去掉单引号和双引号
+                    value = value.strip().strip('"').strip("'")
+                    env_vars[key.strip()] = value
+    except Exception as e:
+        print(f"Warning: Failed to load env file: {e}")
+
+    return env_vars
+
+
 # 静态初始化代码（matplotlib 字体配置等，不包含任何动态内容）
 # 注意：字体缓存已在 Docker 构建阶段预热，这里不再清理/重建
 _KERNEL_INIT_CODE = """
@@ -93,8 +117,20 @@ async def _init_kernel_matplotlib(km: AsyncKernelManager):
     """
     kc = km.client()
     try:
-        # 执行静态初始化代码（不包含任何动态内容）
-        kc.execute(_KERNEL_INIT_CODE, silent=True, store_history=False)
+        # 组装环境变量注入代码
+        env_vars = _load_env_file()
+        env_setup_code = ""
+        if env_vars:
+            env_setup_code = "import os\n"
+            for k, v in env_vars.items():
+                # 使用 repr 处理转义字符
+                env_setup_code += f"os.environ[{repr(k)}] = {repr(v)}\n"
+
+        # 组合完整初始化代码
+        full_init_code = env_setup_code + _KERNEL_INIT_CODE
+
+        # 执行初始化代码
+        kc.execute(full_init_code, silent=True, store_history=False)
 
         # 等待执行完成
         timeout = 10

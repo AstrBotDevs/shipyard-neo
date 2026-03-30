@@ -144,6 +144,14 @@ def get_background_process(process_id: str) -> Optional[Dict]:
     return None
 
 
+def _get_env_file_source() -> str:
+    """获取环境文件 source 语句"""
+    env_file = WORKSPACE_ROOT / ".bay_env.sh"
+    if env_file.exists():
+        return f"source {env_file} && "
+    return ""
+
+
 async def start_interactive_shell(
     cols: int = 80,
     rows: int = 24,
@@ -181,6 +189,9 @@ async def start_interactive_shell(
                 # 设置工作目录
                 os.chdir(str(WORKSPACE_ROOT))
 
+                # 获取环境变量注入 source 语句
+                source_cmd = _get_env_file_source()
+
                 # 准备 sudo 命令参数
                 sudo_cmd = "/usr/bin/sudo"
                 sudo_args = [
@@ -188,8 +199,10 @@ async def start_interactive_shell(
                     "-u",
                     EXEC_USER,
                     "-H",
-                    "bash",  # 显式运行 bash
-                    "-l",  # login shell
+                    "bash",
+                    "-l",
+                    "-c",
+                    f"{source_cmd}exec bash -l",  # source 环境变量后替换为 login shell
                 ]
 
                 os.execvpe(sudo_cmd, sudo_args, process_env)
@@ -253,6 +266,9 @@ async def run_command(
             for key, value in env.items():
                 env_args.append(f"{key}={value}")
 
+        # 获取环境变量注入 source 语句
+        source_cmd = _get_env_file_source()
+
         if shell:
             sudo_args = [
                 "sudo",
@@ -266,7 +282,7 @@ async def run_command(
                 [
                     "bash",
                     "-lc",
-                    f"cd {shlex.quote(str(working_dir))} && {command}",
+                    f"{source_cmd}cd {shlex.quote(str(working_dir))} && {command}",
                 ]
             )
             logger.debug(

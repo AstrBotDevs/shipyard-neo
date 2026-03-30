@@ -87,6 +87,8 @@ profiles:
       - python
     idle_timeout: 1800  # 30 minutes
     warm_pool_size: 1   # Keep 1 pre-warmed instance ready
+    # Environment variables injected into the runtime container (available in Python and Shell)
+    # Example: env: { TZ: "Asia/Shanghai", LANG: "en_US.UTF-8", CUSTOM_VAR: "value" }
     env: {}
     # Optional profile-level proxy override
     # proxy:

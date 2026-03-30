@@ -52,7 +52,9 @@ profiles:
       - upload
       - download
     idle_timeout: 300  # Shorter timeout for tests
-    env: {}
+    # Test env injection: BAY_TEST_ENV_VAR should be available in shell and python
+    env:
+      BAY_TEST_ENV_VAR: "test-value-12345"
 
   # Restricted profile for capability enforcement testing
   - id: python-only-test

@@ -164,7 +164,16 @@ profiles:
       - python
     idle_timeout: 1800  # 30 minutes
     warm_pool_size: 1   # Keep 1 pre-warmed instance ready (0 = disable for this profile)
+    
+    # Environment variables injected into the runtime container.
+    # These persist across calls and are available in both Python and Shell.
+    # Example:
+    # env:
+    #   TZ: "Asia/Shanghai"           # Set timezone
+    #   LANG: "en_US.UTF-8"           # Set locale
+    #   CUSTOM_VAR: "custom_value"    # Custom variable
     env: {}
+    
     # Optional: profile-level proxy override
     # proxy:
     #   enabled: false

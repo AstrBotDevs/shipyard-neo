@@ -242,6 +242,13 @@ class DockerDriver(Driver):
         )
         env.extend(f"{k}={v}" for k, v in proxy_env.items())
 
+        # Phase 2.5: Encode profile env vars for entrypoint.sh to generate .bay_env.sh
+        # Only pass explicit user/profile envs, not the injected system ones
+        if primary.env:
+            env_pairs = [f"{k}={v}" for k, v in primary.env.items()]
+            bay_profile_env = ":".join(env_pairs)
+            env.append(f"BAY_PROFILE_ENV={bay_profile_env}")
+
         env.extend(
             [
                 f"BAY_SESSION_ID={session.id}",
@@ -702,6 +709,12 @@ class DockerDriver(Driver):
             container_proxy=spec.proxy,
         )
         env.extend(f"{k}={v}" for k, v in proxy_env.items())
+
+        # Phase 2.5: Encode profile env vars for entrypoint.sh to generate .bay_env.sh
+        if spec.env:
+            env_pairs = [f"{k}={v}" for k, v in spec.env.items()]
+            bay_profile_env = ":".join(env_pairs)
+            env.append(f"BAY_PROFILE_ENV={bay_profile_env}")
 
         env.extend(
             [

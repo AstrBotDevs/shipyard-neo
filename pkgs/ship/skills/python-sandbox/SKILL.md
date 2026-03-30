@@ -240,6 +240,49 @@ cd project && npm install && npm run build
 # Output is in /workspace/project/dist/
 ```
 
+## Environment Variables
+
+Profile-level environment variables can be configured in Bay's `config.yaml` and are automatically injected into the sandbox runtime:
+
+```yaml
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    env:
+      API_KEY: "secret-key-12345"
+      DEBUG_MODE: "true"
+      DATABASE_URL: "postgresql://localhost/mydb"
+```
+
+### How It Works
+
+1. **Container Startup**: Bay encodes `profile.env` as `BAY_PROFILE_ENV` (format: `KEY1=VALUE1:KEY2=VALUE2`)
+2. **Entrypoint Processing**: Ship's entrypoint.sh parses `BAY_PROFILE_ENV` and generates `/workspace/.bay_env.sh`
+3. **Runtime Injection**:
+   - **Shell**: Commands automatically source `/workspace/.bay_env.sh` before execution
+   - **Python**: IPython kernel loads environment variables at startup
+
+### Accessing Environment Variables
+
+**In Shell**:
+```bash
+echo $API_KEY
+# Output: secret-key-12345
+```
+
+**In Python**:
+```python
+import os
+print(os.environ.get("API_KEY"))
+# Output: secret-key-12345
+```
+
+### Persistence Notes
+
+- Environment variables persist for the lifetime of the sandbox
+- Changes to `profile.env` require creating a new sandbox
+- Users can manually add custom env vars to `/workspace/.bashrc` for persistence across shell sessions
+
 ## Constraints Summary
 
 | Constraint | Value |
@@ -253,3 +296,4 @@ cd project && npm install && npm run build
 | Python runtime | 3.13 (IPython kernel, variables persist) |
 | Node.js runtime | LTS (npm, pnpm, vercel) |
 | Shell user | `shipyard` with passwordless sudo |
+| Profile env vars | Automatically injected via `/workspace/.bay_env.sh` |

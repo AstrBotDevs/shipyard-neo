@@ -87,6 +87,35 @@ Ship container is based on `python:3.13-slim-bookworm` with rich pre-installed t
 
 `git`, `curl`, `vim-tiny`, `nano`, `less`, `htop`, `procps`, `sudo`
 
+### Environment Variables
+
+Profile-level environment variables can be configured in Bay's `config.yaml` and are automatically injected into sandboxes:
+
+```yaml
+profiles:
+  - id: python-default
+    image: "ship:latest"
+    env:
+      API_KEY: "secret-key-12345"
+      DEBUG_MODE: "true"
+```
+
+These environment variables are:
+- Available in **Shell** commands (via `/workspace/.bay_env.sh`)
+- Available in **Python** code (via `os.environ`)
+- Persist for the lifetime of the sandbox
+
+**Accessing in Python**:
+```python
+import os
+api_key = os.environ.get("API_KEY")
+```
+
+**Accessing in Shell**:
+```bash
+echo $API_KEY
+```
+
 ## Core Workflows
 
 ### 1. Sandbox Lifecycle
