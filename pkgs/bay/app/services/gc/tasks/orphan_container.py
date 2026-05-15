@@ -1,7 +1,7 @@
 """OrphanContainerGC - Clean up orphan containers (Strict mode).
 
 SAFETY FIRST: This task only deletes containers that:
-1. Have name prefix "bay-session-"
+1. Have name prefix "bay-"
 2. Have ALL required labels (bay.session_id, bay.sandbox_id, etc.)
 3. Have bay.managed="true"
 4. Have bay.instance_id matching the configured gc.instance_id
@@ -38,7 +38,7 @@ REQUIRED_LABELS = [
 ]
 
 # Container name prefix for Bay-managed containers
-CONTAINER_NAME_PREFIX = "bay-session-"
+CONTAINER_NAME_PREFIX = "bay-"
 
 
 class OrphanContainerGC(GCTask):
@@ -50,7 +50,7 @@ class OrphanContainerGC(GCTask):
 
     STRICT MODE (default and only mode):
         Only containers meeting ALL of the following criteria are deleted:
-        1. Name starts with "bay-session-"
+        1. Name starts with "bay-"
         2. Has all required labels
         3. bay.managed = "true"
         4. bay.instance_id = configured gc.instance_id
@@ -125,7 +125,7 @@ class OrphanContainerGC(GCTask):
                 "gc.orphan_container.skip.name_prefix",
                 instance_id=instance.id,
                 instance_name=instance.name,
-                reason="name does not start with bay-session-",
+                reason="name does not start with bay-",
             )
             result.skipped_count += 1
             return False
