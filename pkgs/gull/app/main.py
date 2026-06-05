@@ -545,6 +545,19 @@ async def health() -> HealthResponse:
     )
 
 
+@app.delete("/sessions/{sandbox_id}")
+async def delete_session(sandbox_id: str) -> dict:
+    """Destroy a browser session for a sandbox (shared mode only).
+
+    Calls agent-browser close for the session daemon.  Best-effort —
+    returns successfully even if the session was already gone.
+    """
+    if GULL_MODE == "shared":
+        from app.session import destroy_session
+        await destroy_session(sandbox_id)
+    return {"sandbox_id": sandbox_id, "destroyed": True}
+
+
 @app.get("/meta", response_model=MetaResponse)
 async def meta() -> MetaResponse:
     """Runtime metadata endpoint.

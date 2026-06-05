@@ -583,6 +583,28 @@ class SandboxManager:
         # Cleanup in-memory lock for this sandbox (outside of lock)
         await cleanup_sandbox_lock(sandbox_id)
 
+        # If this sandbox used a shared browser, notify the Gull Service
+        # to destroy its isolated session.  Best-effort — failure logged.
+        try:
+            profile = self._settings.get_profile(sandbox.profile_id)
+            if profile is not None and profile.browser == "shared":
+                bs_cfg = getattr(self._settings, "browser_service", None)
+                if bs_cfg and bs_cfg.enabled:
+                    from app.adapters.shared_gull import SharedGullAdapter
+
+                    adapter = SharedGullAdapter(bs_cfg.endpoint)
+                    await adapter.destroy_session(sandbox_id)
+                    self._log.debug(
+                        "sandbox.delete.shared_gull_cleanup",
+                        sandbox_id=sandbox_id,
+                    )
+        except Exception:
+            self._log.debug(
+                "sandbox.delete.shared_gull_cleanup_failed",
+                sandbox_id=sandbox_id,
+                exc_info=True,
+            )
+
     async def delete_by_id(
         self,
         *,
