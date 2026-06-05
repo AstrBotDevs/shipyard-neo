@@ -726,12 +726,16 @@ class DockerDriver(Driver):
         )
 
         # Host config
+        # NOTE: NetworkMode intentionally omitted here — NetworkingConfig
+        # (set below) already handles session-network attachment with alias
+        # support.  Setting both for the same network confuses the Docker
+        # daemon and causes container.start() to be rejected, leaving
+        # containers permanently in "created" state.
         host_config: dict[str, Any] = {
             "Binds": [f"{cargo.driver_ref}:{WORKSPACE_MOUNT_PATH}:rw"],
             "Memory": mem_limit,
             "NanoCpus": nano_cpus,
             "PidsLimit": 256,
-            "NetworkMode": network_name,
         }
 
         # Port publishing for Bay -> container access
