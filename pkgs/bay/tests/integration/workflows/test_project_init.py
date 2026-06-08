@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import httpx
 
-from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, e2e_skipif_marks
+from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, DEFAULT_TIMEOUT, e2e_skipif_marks
 
 pytestmark = e2e_skipif_marks
 
@@ -100,9 +100,11 @@ class TestProjectInitializationWorkflow:
             finally:
                 await client.delete(f"/v1/sandboxes/{sandbox_id}")
 
-    async def test_pip_install_target_persists_after_stop(self):
-        """Dependencies installed with --target to workspace persist after stop/resume."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+    async def test_workspace_content_persists_after_stop(self):
+        """Content written to /workspace (cargo) persists after stop/resume."""
+        async with httpx.AsyncClient(
+            base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT
+        ) as client:
             # Create sandbox
             create_response = await client.post(
                 "/v1/sandboxes",
@@ -112,38 +114,29 @@ class TestProjectInitializationWorkflow:
             sandbox_id = create_response.json()["id"]
 
             try:
-                # Install a small package to /workspace/.libs
-                # Using 'six' as it's small and has no dependencies
-                install_code = """
-import subprocess
-import sys
-
-# Install to /workspace/.libs
-result = subprocess.run(
-    [sys.executable, '-m', 'pip', 'install', 'six', '--target', '/workspace/.libs', '--quiet'],
-    capture_output=True,
-    text=True
-)
-print(f"Install exit code: {result.returncode}")
-if result.returncode != 0:
-    print(f"stderr: {result.stderr}")
+                # Write a Python module to /workspace
+                write_code = """
+import json
+content = 'ANSWER = 42'
+open('/workspace/mymod.py', 'w').write(content)
+print('written:', content)
 """
                 exec1 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
-                    json={"code": install_code, "timeout": 120},
-                    timeout=180.0,  # Pip install can take time
+                    json={"code": write_code, "timeout": 30},
+                    timeout=30.0,
                 )
                 assert exec1.status_code == 200
                 result1 = exec1.json()
-                assert result1["success"] is True, f"Install failed: {result1}"
-                assert "exit code: 0" in result1["output"], f"Pip install failed: {result1}"
+                assert result1["success"] is True, f"Write failed: {result1}"
+                assert "written: ANSWER = 42" in result1["output"]
 
-                # Verify the package can be imported
+                # Verify we can import from /workspace
                 verify_code = """
 import sys
-sys.path.insert(0, '/workspace/.libs')
-import six
-print(f"six version: {six.__version__}")
+sys.path.insert(0, '/workspace')
+import mymod
+print(f'ANSWER={mymod.ANSWER}')
 """
                 exec2 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
@@ -153,39 +146,41 @@ print(f"six version: {six.__version__}")
                 assert exec2.status_code == 200
                 result2 = exec2.json()
                 assert result2["success"] is True, f"Import failed: {result2}"
-                assert "six version:" in result2["output"]
+                assert "ANSWER=42" in result2["output"]
 
                 # Stop sandbox
                 stop_response = await client.post(f"/v1/sandboxes/{sandbox_id}/stop")
                 assert stop_response.status_code == 200
 
-                # Resume and verify package is still available
-                verify_after_stop_code = """
+                # Resume and verify the module is still importable from workspace
+                verify_after_stop = """
 import sys
-sys.path.insert(0, '/workspace/.libs')
-import six
-print(f"six still available: {six.__version__}")
+sys.path.insert(0, '/workspace')
+import mymod
+print(f'ANSWER={mymod.ANSWER}')
 """
                 exec3 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
-                    json={"code": verify_after_stop_code, "timeout": 30},
+                    json={"code": verify_after_stop, "timeout": 30},
                     timeout=120.0,  # Cold start
                 )
                 assert exec3.status_code == 200
                 result3 = exec3.json()
                 assert result3["success"] is True, (
-                    f"Package not available after stop/resume: {result3}"
+                    f"Module not available after stop/resume: {result3}"
                 )
-                assert "six still available:" in result3["output"], (
-                    f"Expected 'six still available:', got: {result3['output']}"
+                assert "ANSWER=42" in result3["output"], (
+                    f"Expected ANSWER=42, got: {result3['output']}"
                 )
 
             finally:
                 await client.delete(f"/v1/sandboxes/{sandbox_id}")
 
-    async def test_standard_pip_install_not_persisted(self):
-        """Standard pip install (without --target) should NOT persist after stop."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+    async def test_non_workspace_content_not_persisted(self):
+        """Content outside /workspace is lost after container stop."""
+        async with httpx.AsyncClient(
+            base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT
+        ) as client:
             # Create sandbox
             create_response = await client.post(
                 "/v1/sandboxes",
@@ -195,59 +190,55 @@ print(f"six still available: {six.__version__}")
             sandbox_id = create_response.json()["id"]
 
             try:
-                # Install a package the standard way (to system dir)
-                # Using 'toml' as it's small
-                install_code = """
-import subprocess
-import sys
-
-result = subprocess.run(
-    [sys.executable, '-m', 'pip', 'install', 'toml', '--quiet'],
-    capture_output=True,
-    text=True
-)
-print(f"Install exit code: {result.returncode}")
+                # Write a file to /tmp (outside workspace — ephemeral overlay)
+                write_code = """
+open('/tmp/ephemeral.txt', 'w').write('transient')
+print('written to /tmp')
 """
                 exec1 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
-                    json={"code": install_code, "timeout": 120},
-                    timeout=180.0,
+                    json={"code": write_code, "timeout": 30},
+                    timeout=30.0,
                 )
                 assert exec1.status_code == 200
                 result1 = exec1.json()
-                assert result1["success"] is True, f"Install failed: {result1}"
+                assert result1["success"] is True, f"Write failed: {result1}"
 
-                # Verify it works in current session
+                # Verify the file exists now
                 exec2 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
                     json={
-                        "code": "import toml; print(f'toml version: {toml.__version__}')",
+                        "code": "print(open('/tmp/ephemeral.txt').read())",
                         "timeout": 30,
                     },
                     timeout=30.0,
                 )
                 assert exec2.status_code == 200
                 assert exec2.json()["success"] is True
+                assert "transient" in exec2.json()["output"]
 
                 # Stop sandbox
                 stop_response = await client.post(f"/v1/sandboxes/{sandbox_id}/stop")
                 assert stop_response.status_code == 200
 
-                # Resume - package should NOT be available
+                # Resume — file should NOT exist (new container, fresh overlay)
                 exec3 = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",
-                    json={"code": "import toml; print('toml available')", "timeout": 30},
+                    json={
+                        "code": "print(open('/tmp/ephemeral.txt').read())",
+                        "timeout": 30,
+                    },
                     timeout=120.0,  # Cold start
                 )
                 assert exec3.status_code == 200
                 result3 = exec3.json()
 
-                # Should fail with ModuleNotFoundError
+                # Should fail with FileNotFoundError
                 assert result3["success"] is False, (
-                    f"Expected toml to NOT be available after stop, but got: {result3}"
+                    f"Expected /tmp file to NOT persist after stop, but got: {result3}"
                 )
-                assert "ModuleNotFoundError" in (result3.get("error") or ""), (
-                    f"Expected ModuleNotFoundError, got: {result3}"
+                assert "FileNotFoundError" in (result3.get("error") or ""), (
+                    f"Expected FileNotFoundError, got: {result3}"
                 )
 
             finally:

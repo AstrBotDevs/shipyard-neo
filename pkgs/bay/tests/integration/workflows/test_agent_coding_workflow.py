@@ -19,7 +19,7 @@ import uuid
 
 import httpx
 
-from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, e2e_skipif_marks
+from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, DEFAULT_TIMEOUT, e2e_skipif_marks
 
 pytestmark = e2e_skipif_marks
 
@@ -265,7 +265,9 @@ for i in [10, 20, 30]:
         - Same key returns same sandbox
         - Different key creates different sandbox
         """
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(
+            base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT
+        ) as client:
             task_id = f"agent-{uuid.uuid4().hex[:8]}"
             create_key = f"{task_id}-create"
 

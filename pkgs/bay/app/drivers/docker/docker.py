@@ -461,44 +461,69 @@ class DockerDriver(Driver):
     # Volume management
 
     async def create_volume(self, name: str, labels: dict[str, str] | None = None) -> str:
-        """Create a cargo directory and return the host path for Docker binds.
+        """Create a cargo volume.
 
-        Cargo volumes are plain directories (bind mounts), not Docker named
-        volumes.  This lets the shared Gull service mount the cargo root and
-        access per-sandbox cargo subdirectories via /cargos/<cargo_id>.
+        When ``cargo.host_root_path`` is configured: creates a plain
+        directory at that path (bind mount) and returns the host path.
+        Used for shared browser deployments where Gull needs access to
+        per-sandbox cargo directories.
 
-        Uses ``cargo.host_root_path`` to create the directory — Docker Binds
-        always reference the **host** filesystem, not Bay's container fs.
+        When ``host_root_path`` is NOT configured: creates a Docker named
+        volume.  The name is used directly in Binds and Docker resolves
+        it from the daemon's volume store — the right default when Bay
+        runs inside a container with no host filesystem knowledge.
         """
         settings = get_settings()
-        # Use host_root_path for Docker Binds; root_path is Bay's internal view.
-        host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
-        cargo_path = host_root / name
-        cargo_path.mkdir(parents=True, exist_ok=True)
-        self._log.info("docker.create_volume", name=name, path=str(cargo_path))
-        return str(cargo_path)
+
+        if settings.cargo.host_root_path:
+            # Bind-mount mode: directory on the Docker host
+            host_root = Path(settings.cargo.host_root_path)
+            cargo_path = host_root / name
+            cargo_path.mkdir(parents=True, exist_ok=True)
+            self._log.info("docker.create_volume.bind", name=name, path=str(cargo_path))
+            return str(cargo_path)
+
+        # Named-volume mode: Docker manages the volume lifecycle
+        client = await self._get_client()
+        await client.volumes.create({"Name": name, "Labels": labels or {}})
+        self._log.info("docker.create_volume.named", name=name)
+        return name
 
     async def delete_volume(self, name: str) -> None:
-        """Delete a cargo directory (name or absolute path)."""
-        cargo_path = Path(name)
-        # If name is relative (e.g. "bay-cargo-ws-xxx"), resolve it under
-        # the host root.  If it's already absolute, use it directly.
-        if not cargo_path.is_absolute():
-            settings = get_settings()
-            host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
-            cargo_path = host_root / name
-        self._log.info("docker.delete_volume", name=name, path=str(cargo_path))
-        if cargo_path.exists():
-            shutil.rmtree(cargo_path, ignore_errors=True)
+        """Delete a cargo volume (directory or named volume)."""
+        settings = get_settings()
+
+        if settings.cargo.host_root_path:
+            # Bind-mount mode: name is already a host path, delete directory
+            cargo_path = Path(name)
+            if cargo_path.exists():
+                shutil.rmtree(cargo_path, ignore_errors=True)
+            self._log.info("docker.delete_volume.bind", path=str(cargo_path))
+        else:
+            # Named-volume mode: name is volume name
+            try:
+                client = await self._get_client()
+                vol = await client.volumes.get(name)
+                await vol.delete()
+                self._log.info("docker.delete_volume.named", name=name)
+            except DockerError:
+                self._log.warning("docker.delete_volume.not_found", name=name)
 
     async def volume_exists(self, name: str) -> bool:
-        """Check if cargo directory exists (name or absolute path)."""
-        cargo_path = Path(name)
-        if not cargo_path.is_absolute():
-            settings = get_settings()
-            host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
-            cargo_path = host_root / name
-        return cargo_path.is_dir()
+        """Check if cargo volume exists."""
+        settings = get_settings()
+
+        if settings.cargo.host_root_path:
+            # Bind-mount mode: name is already the host path
+            return Path(name).is_dir()
+
+        # Named-volume mode
+        try:
+            client = await self._get_client()
+            await client.volumes.get(name)
+            return True
+        except DockerError:
+            return False
 
     # Runtime instance discovery (for GC)
 

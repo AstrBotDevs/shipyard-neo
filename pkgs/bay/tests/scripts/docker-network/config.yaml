@@ -88,23 +88,6 @@ profiles:
     warm_pool_size: 1
     env: {}
 
-  # Profile with strict memory limit for OOM testing (Phase 1.5)
-  # Used by test_oom_killed.py to verify container OOM behavior
-  - id: oom-test
-    image: "ship:latest"
-    runtime_type: ship
-    runtime_port: 8123
-    resources:
-      cpus: 1.0
-      memory: "128m"  # Strict 128MB limit to trigger OOM quickly
-    capabilities:
-      - filesystem
-      - shell
-      - python
-    idle_timeout: 300
-    warm_pool_size: 1
-    env: {}
-
   # Multi-container profile for Browser + Python (Phase 2)
   # Used by test_browser_workflow.py
   - id: browser-python

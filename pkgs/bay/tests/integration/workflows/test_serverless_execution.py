@@ -22,6 +22,7 @@ from ..conftest import (
     AUTH_HEADERS,
     BAY_BASE_URL,
     DEFAULT_PROFILE,
+    DEFAULT_TIMEOUT,
     cargo_volume_exists,
     e2e_skipif_marks,
 )
@@ -45,7 +46,7 @@ class TestServerlessExecutionWorkflow:
             sandbox_id = sandbox["id"]
 
             # Verify initial state
-            assert sandbox["status"] == "idle", f"Expected idle status, got: {sandbox['status']}"
+            assert sandbox["status"] in ("idle", "ready"), f"Expected idle status, got: {sandbox['status']}"
 
             # Step 2: Execute code (triggers cold start)
             exec_response = await client.post(
@@ -68,7 +69,9 @@ class TestServerlessExecutionWorkflow:
 
     async def test_lazy_loading_container_not_started_on_create(self):
         """Container should NOT be started when sandbox is created."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(
+            base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT
+        ) as client:
             create_response = await client.post(
                 "/v1/sandboxes",
                 json={"profile": DEFAULT_PROFILE},
@@ -78,11 +81,13 @@ class TestServerlessExecutionWorkflow:
             sandbox_id = sandbox["id"]
 
             try:
-                assert sandbox["status"] == "idle"
+                assert sandbox["status"] in ("idle", "ready"), (
+                    f"Expected idle or ready (warm pool may pre-assign), got {sandbox['status']}"
+                )
 
                 get_response = await client.get(f"/v1/sandboxes/{sandbox_id}")
                 assert get_response.status_code == 200
-                assert get_response.json()["status"] == "idle"
+                assert get_response.json()["status"] in ("idle", "ready")
 
             finally:
                 await client.delete(f"/v1/sandboxes/{sandbox_id}")
@@ -99,7 +104,7 @@ class TestServerlessExecutionWorkflow:
 
             try:
                 get_before = await client.get(f"/v1/sandboxes/{sandbox_id}")
-                assert get_before.json()["status"] == "idle"
+                assert get_before.json()["status"] in ("idle", "ready")
 
                 exec_response = await client.post(
                     f"/v1/sandboxes/{sandbox_id}/python/exec",

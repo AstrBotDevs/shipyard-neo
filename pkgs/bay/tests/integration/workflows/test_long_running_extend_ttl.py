@@ -22,7 +22,7 @@ import uuid
 
 import httpx
 
-from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, e2e_skipif_marks
+from ..conftest import AUTH_HEADERS, BAY_BASE_URL, DEFAULT_PROFILE, DEFAULT_TIMEOUT, e2e_skipif_marks
 
 pytestmark = e2e_skipif_marks
 
@@ -32,7 +32,7 @@ class TestLongRunningExtendTTLWorkflow:
 
     async def test_long_task_workflow_with_extend_ttl(self):
         """Complete workflow: short TTL -> run task -> extend -> continue -> cleanup."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT) as client:
             # Step 1: Create sandbox with short TTL (120s) - simulating underestimated duration
             create_resp = await client.post(
                 "/v1/sandboxes",
@@ -104,7 +104,7 @@ class TestLongRunningExtendTTLWorkflow:
 
     async def test_extend_ttl_rejected_after_expiration(self):
         """After TTL expiration, extend_ttl should be rejected (no resurrection)."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT) as client:
             # Use a slightly longer TTL (5s) and correspondingly longer sleep
             # to be robust under high CPU load in parallel test environments.
             ttl_seconds = 5
@@ -138,7 +138,7 @@ class TestLongRunningExtendTTLWorkflow:
 
     async def test_extend_ttl_rejected_for_infinite_ttl(self):
         """Extending TTL on a sandbox without TTL (infinite) should be rejected."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT) as client:
             create_resp = await client.post(
                 "/v1/sandboxes",
                 json={"profile": DEFAULT_PROFILE},
@@ -164,7 +164,7 @@ class TestLongRunningExtendTTLWorkflow:
 
     async def test_extend_ttl_does_not_affect_running_session(self):
         """extend_ttl affects expires_at but does not restart the session."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT) as client:
             create_resp = await client.post(
                 "/v1/sandboxes",
                 json={"profile": DEFAULT_PROFILE, "ttl": 300},
@@ -202,7 +202,9 @@ class TestLongRunningExtendTTLWorkflow:
 
     async def test_multiple_extend_ttl_accumulates(self):
         """Multiple extend_ttl calls with different idempotency keys should each extend."""
-        async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
+        async with httpx.AsyncClient(
+            base_url=BAY_BASE_URL, headers=AUTH_HEADERS, timeout=DEFAULT_TIMEOUT
+        ) as client:
             create_resp = await client.post(
                 "/v1/sandboxes",
                 json={"profile": DEFAULT_PROFILE, "ttl": 60},

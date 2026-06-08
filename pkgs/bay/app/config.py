@@ -358,7 +358,10 @@ class CargoConfig(BaseModel):
     root_path: str = "/var/lib/bay/cargos"
     # Corresponding path on the Docker host (for bind-mount Binds).
     # Only used by the Docker driver; K8s driver uses PVCs and ignores this.
-    host_root_path: str = "/var/lib/bay/cargos"
+    # When set, cargo volumes become bind-mount directories, enabling shared
+    # browser deployments (Gull accesses cargo via a shared /cargos mount).
+    # When None (the default), Docker named volumes are used instead.
+    host_root_path: str | None = None
     default_size_limit_mb: int = 1024
     # Mount path inside sandbox containers (fixed).
     mount_path: str = "/workspace"
