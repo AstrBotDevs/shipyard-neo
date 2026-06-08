@@ -668,6 +668,7 @@ class DockerDriver(Driver):
         network_name: str,
         extra_labels: dict[str, str] | None = None,
         profile_proxy: "ProxyConfig | None" = None,
+        connect_bay_network: bool = False,
     ) -> tuple[dict[str, Any], str]:
         """Build Docker container config for a single ContainerSpec.
 
@@ -725,17 +726,18 @@ class DockerDriver(Driver):
             ]
         )
 
-        # Host config
-        # NOTE: NetworkMode intentionally omitted here — NetworkingConfig
-        # (set below) already handles session-network attachment with alias
-        # support.  Setting both for the same network confuses the Docker
-        # daemon and causes container.start() to be rejected, leaving
-        # containers permanently in "created" state.
+        # Host config.
+        # NetworkMode = session network (primary): provides Docker's embedded
+        # DNS resolver (127.0.0.11) so containers can resolve external domains
+        # and discover each other by container-name / hostname.
+        # The bay-network is attached separately via EndpointsConfig below.
+        # No conflict because the two networks are *different*.
         host_config: dict[str, Any] = {
             "Binds": [f"{cargo.driver_ref}:{WORKSPACE_MOUNT_PATH}:rw"],
             "Memory": mem_limit,
             "NanoCpus": nano_cpus,
             "PidsLimit": 256,
+            "NetworkMode": network_name,
         }
 
         # Port publishing for Bay -> container access
@@ -755,14 +757,20 @@ class DockerDriver(Driver):
             }
             host_config["PortBindings"] = port_bindings
 
-        # Networking config with alias = container spec name
-        networking_config = {
-            "EndpointsConfig": {
-                network_name: {
-                    "Aliases": [spec.name],
+        # Networking config: attach bay-network if it differs from the
+        # session network.  Session network is already the primary via
+        # NetworkMode — putting the same network here would be a duplicate
+        # and risk container.start() being rejected on some Docker versions.
+        # Container-to-container DNS works without explicit Aliases because
+        # Docker auto-registers container-name and hostname on all
+        # user-defined networks.
+        networking_config: dict[str, Any] | None = None
+        if connect_bay_network and self._network and self._network != network_name:
+            networking_config = {
+                "EndpointsConfig": {
+                    self._network: {},
                 }
             }
-        }
 
         config: dict[str, Any] = {
             "Image": spec.image,
@@ -771,8 +779,10 @@ class DockerDriver(Driver):
             "HostConfig": host_config,
             "ExposedPorts": exposed_ports,
             "Hostname": spec.name,
-            "NetworkingConfig": networking_config,
         }
+        # Only include NetworkingConfig when there are additional networks
+        if networking_config is not None:
+            config["NetworkingConfig"] = networking_config
 
         return config, container_name
 
@@ -839,6 +849,7 @@ class DockerDriver(Driver):
                 network_name=network_name,
                 extra_labels=labels,
                 profile_proxy=profile.proxy,
+                connect_bay_network=connect_bay_network,
             )
 
             self._log.info(
@@ -854,25 +865,6 @@ class DockerDriver(Driver):
                     config=config,
                     name=container_name,
                 )
-
-                # Also connect to Bay's global network so Bay can reach
-                # the container via container IP.
-                if connect_bay_network:
-                    try:
-                        bay_net = await client.networks.get(self._network)
-                        await bay_net.connect({"Container": container.id})
-                        self._log.debug(
-                            "docker.create_multi.connected_bay_network",
-                            container_name=container_name,
-                            bay_network=self._network,
-                        )
-                    except DockerError as net_err:
-                        self._log.warning(
-                            "docker.create_multi.connect_bay_network_failed",
-                            container_name=container_name,
-                            bay_network=self._network,
-                            error=str(net_err),
-                        )
 
                 results.append(
                     MultiContainerInfo(

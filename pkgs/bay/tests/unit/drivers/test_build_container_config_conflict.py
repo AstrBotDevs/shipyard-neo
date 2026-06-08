@@ -94,17 +94,19 @@ SESSION_NETWORK = "bay_net_sess-test123"
 
 
 class TestMultiContainerConfigNoNetworkModeConflict:
-    """Multi-container _build_container_config must not set NetworkMode
-    when NetworkingConfig is also present."""
+    """Multi-container _build_container_config must set NetworkMode
+    for DNS + session network, and only put *different* networks
+    (e.g. bay-network) in EndpointsConfig."""
 
-    def test_host_config_has_no_network_mode(
+    def test_host_config_has_network_mode_set_to_session_network(
         self,
         driver: DockerDriver,
         session: Session,
         cargo: Cargo,
     ):
-        """HostConfig.NetworkMode must be absent — NetworkingConfig
-        already handles session-network attachment."""
+        """HostConfig.NetworkMode must be the session network — this
+        activates Docker's embedded DNS resolver (127.0.0.11).  Without
+        it containers get 'Temporary failure in name resolution'."""
         profile = _make_multi_profile()
         spec = profile.containers[0]
 
@@ -118,20 +120,21 @@ class TestMultiContainerConfigNoNetworkModeConflict:
         host_config = config.get("HostConfig", {})
         network_mode = host_config.get("NetworkMode")
 
-        assert network_mode is None, (
-            f"HostConfig.NetworkMode is {network_mode!r}, but should be absent. "
-            "NetworkingConfig already handles session-network connection. "
-            "Setting both for the same network confuses Docker and caused "
-            "containers to stay in 'created' state (issue #15)."
+        assert network_mode == SESSION_NETWORK, (
+            f"HostConfig.NetworkMode is {network_mode!r}, expected {SESSION_NETWORK!r}. "
+            "Without NetworkMode set to the session network, Docker won't enable "
+            "its embedded DNS resolver, causing 'Temporary failure in name resolution'."
         )
 
-    def test_networking_config_has_session_network(
+    def test_networking_config_absent_when_no_bay_network(
         self,
         driver: DockerDriver,
         session: Session,
         cargo: Cargo,
     ):
-        """NetworkingConfig must include the session network with alias."""
+        """When no bay-network is configured (connect_bay_network=False),
+        NetworkingConfig must be absent — session network is already the
+        primary via NetworkMode."""
         profile = _make_multi_profile()
         spec = profile.containers[0]
 
@@ -140,24 +143,23 @@ class TestMultiContainerConfigNoNetworkModeConflict:
             session=session,
             cargo=cargo,
             network_name=SESSION_NETWORK,
+            # connect_bay_network defaults to False → no bay-network
         )
 
-        networking_config = config.get("NetworkingConfig", {})
-        endpoints = networking_config.get("EndpointsConfig", {})
-
-        assert SESSION_NETWORK in endpoints, (
-            f"NetworkingConfig.EndpointsConfig missing {SESSION_NETWORK!r}. "
-            f"Got: {list(endpoints.keys())}"
+        networking_config = config.get("NetworkingConfig")
+        assert networking_config is None, (
+            f"NetworkingConfig should be None when connect_bay_network=False. "
+            f"Got: {networking_config!r}"
         )
 
-    def test_all_containers_in_profile_avoid_conflict(
+    def test_all_containers_in_profile_have_session_network_as_primary(
         self,
         driver: DockerDriver,
         session: Session,
         cargo: Cargo,
     ):
-        """Every container spec in a multi-container profile must
-        produce a conflict-free config."""
+        """Every container spec in a multi-container profile must have
+        session network as NetworkMode and NO duplicate in EndpointsConfig."""
         profile = _make_multi_profile()
 
         for spec in profile.containers:
@@ -169,9 +171,18 @@ class TestMultiContainerConfigNoNetworkModeConflict:
             )
 
             network_mode = config.get("HostConfig", {}).get("NetworkMode")
-            assert network_mode is None, (
+            assert network_mode == SESSION_NETWORK, (
                 f"Container '{spec.name}' ({name}): "
-                f"HostConfig.NetworkMode is {network_mode!r}"
+                f"NetworkMode={network_mode!r} should be {SESSION_NETWORK!r}"
+            )
+
+            # When connect_bay_network=False, NetworkingConfig must be absent
+            # (session network is already the primary via NetworkMode)
+            nc = config.get("NetworkingConfig")
+            assert nc is None, (
+                f"Container '{spec.name}' ({name}): "
+                f"NetworkingConfig should be None (connect_bay_network=False), "
+                f"got {nc!r}"
             )
 
 
