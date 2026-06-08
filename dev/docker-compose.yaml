@@ -12,8 +12,8 @@
 
 services:
   # ── Gull Service (shared browser pool) ─────────────────
-  # Long-running shared Chromium. All sandboxes with browser:shared
-  # route through this instead of creating per-sandbox gull containers.
+  # Long-running shared Chromium. Mounts the cargo root so it can
+  # translate /workspace → /cargos/bay-cargo-{id} for screenshots/uploads.
   gull-service:
     image: shipyard-neo/gull:dev
     container_name: shipyard-dev-gull
@@ -22,6 +22,8 @@ services:
       - GULL_MODE=shared
       - GULL_CDP_PORT=9222
       - AGENT_BROWSER_IDLE_TIMEOUT_MS=600000  # 10 min
+    volumes:
+      - ./bay-cargos:/cargos:rw
     networks:
       - shipyard-dev
 
@@ -39,6 +41,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./config.yaml:/app/config.yaml:ro
       - ./bay-data:/app/data
+      - ./bay-cargos:/bay/cargos
     environment:
       - BAY_CONFIG_FILE=/app/config.yaml
     networks:

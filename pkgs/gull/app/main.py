@@ -32,6 +32,49 @@ from pydantic import BaseModel, Field
 
 GULL_MODE = os.environ.get("GULL_MODE", "single")  # "single" | "shared"
 
+# ── Shared-mode path translation ─────────────────────────────────
+# agent-browser commands that accept file paths under /workspace.
+# When running in shared mode, /workspace is translated to the
+# per-sandbox cargo path so that screenshots and uploads land on the
+# correct Cargo volume (not the shared Gull container's local fs).
+_FILE_PATH_COMMANDS = frozenset({"screenshot", "pdf", "upload", "file_server"})
+
+_CARGO_VOLUMES_ROOT = "/cargos"
+
+
+def _translate_and_split(cmd: str, cargo_id: str) -> tuple[list[str], str, str]:
+    """Translate /workspace paths and derive cwd + profile for shared mode.
+
+    Parses the command line with shlex, then replaces every argument that
+    starts with ``/workspace`` with the per-sandbox cargo path.  Only
+    file-path commands (screenshot / pdf / upload / file_server) are
+    touched; everything else passes through unchanged.
+
+    Cargo directories are named ``bay-cargo-{cargo_id}`` under
+    ``_CARGO_VOLUMES_ROOT`` (matching the naming convention in
+    ``CargoManager._create_volume``).
+
+    Returns:
+        (argv, cwd, profile_path)
+    """
+    cargo_path = f"{_CARGO_VOLUMES_ROOT}/bay-cargo-{cargo_id}"
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return [cmd], cargo_path, f"{cargo_path}/.browser/profile"
+
+    if not argv or argv[0] not in _FILE_PATH_COMMANDS:
+        return argv, cargo_path, f"{cargo_path}/.browser/profile"
+
+    for i in range(len(argv)):
+        arg = argv[i]
+        if arg == "/workspace":
+            argv[i] = cargo_path
+        elif arg.startswith("/workspace/"):
+            argv[i] = cargo_path + arg[len("/workspace"):]
+
+    return argv, cargo_path, f"{cargo_path}/.browser/profile"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-5s] %(message)s",
@@ -140,6 +183,9 @@ class ExecRequest(BaseModel):
 
     In shared mode, sandbox_id is required for session isolation.
     In single mode, sandbox_id is ignored (uses global SANDBOX_ID).
+
+    cargo_id is used in shared mode to translate /workspace paths to the
+    per-sandbox Cargo volume's real filesystem path.
     """
 
     cmd: str = Field(
@@ -147,6 +193,9 @@ class ExecRequest(BaseModel):
     )
     sandbox_id: str | None = Field(
         default=None, description="Sandbox ID for session isolation (shared mode)"
+    )
+    cargo_id: str | None = Field(
+        default=None, description="Cargo volume ID for path translation (shared mode)"
     )
     timeout: int = Field(default=30, description="Timeout in seconds", ge=1, le=300)
 
@@ -169,6 +218,12 @@ class BatchExecRequest(BaseModel):
         default=60, ge=1, le=600, description="Overall timeout (seconds)"
     )
     stop_on_error: bool = Field(default=True, description="Stop if a command fails")
+    sandbox_id: str | None = Field(
+        default=None, description="Sandbox ID for session isolation (shared mode)"
+    )
+    cargo_id: str | None = Field(
+        default=None, description="Cargo volume ID for path translation (shared mode)"
+    )
 
 
 class BatchStepResult(BaseModel):
@@ -408,7 +463,9 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
     automatic --session injection for browser context isolation.
 
     In shared mode, uses sandbox_id from request for --session isolation
-    connecting to the shared Chromium via --cdp.
+    connecting to the shared Chromium via --cdp.  When cargo_id is also
+    provided, /workspace paths are translated to the per-sandbox Cargo
+    volume so screenshots and uploads land on the correct filesystem.
 
     Examples:
         {"cmd": "open https://example.com"}
@@ -418,13 +475,26 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
     sandbox_id = request.sandbox_id
 
     if GULL_MODE == "shared" and sandbox_id:
-        from app.session import execute_browser
+        # ── Shared mode ────────────────────────────────────────
+        if request.cargo_id:
+            argv, cwd, profile_path = _translate_and_split(request.cmd, request.cargo_id)
+            from app.session import execute_browser_raw
 
-        stdout, stderr, exit_code = await execute_browser(
-            sandbox_id,
-            request.cmd,
-            timeout=request.timeout,
-        )
+            stdout, stderr, exit_code = await execute_browser_raw(
+                sandbox_id,
+                argv,
+                cwd=cwd,
+                profile=profile_path,
+                timeout=request.timeout,
+            )
+        else:
+            from app.session import execute_browser
+
+            stdout, stderr, exit_code = await execute_browser(
+                sandbox_id,
+                request.cmd,
+                timeout=request.timeout,
+            )
         return ExecResponse(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     # ── Single mode (legacy) ────────────────────────────────────────
@@ -443,9 +513,11 @@ async def exec_command(request: ExecRequest) -> ExecResponse:
 async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
     """Execute a batch of agent-browser commands sequentially.
 
-    In shared mode, sandbox-aware; in single mode, uses legacy session.
+    In shared mode, sandbox-aware with optional cargo path translation;
+    in single mode, uses legacy session.
     """
     sandbox_id = getattr(request, "sandbox_id", None)
+    cargo_id = getattr(request, "cargo_id", None)
     batch_start = time.perf_counter()
     results: list[BatchStepResult] = []
 
@@ -458,11 +530,20 @@ async def exec_batch(request: BatchExecRequest) -> BatchExecResponse:
         step_start = time.perf_counter()
 
         if GULL_MODE == "shared" and sandbox_id:
-            from app.session import execute_browser
+            if cargo_id:
+                argv, cwd, profile_path = _translate_and_split(cmd, cargo_id)
+                from app.session import execute_browser_raw
 
-            stdout, stderr, exit_code = await execute_browser(
-                sandbox_id, cmd, timeout=remaining_timeout
-            )
+                stdout, stderr, exit_code = await execute_browser_raw(
+                    sandbox_id, argv, cwd=cwd, profile=profile_path,
+                    timeout=remaining_timeout,
+                )
+            else:
+                from app.session import execute_browser
+
+                stdout, stderr, exit_code = await execute_browser(
+                    sandbox_id, cmd, timeout=remaining_timeout,
+                )
         else:
             profile = None if _browser_ready else BROWSER_PROFILE_DIR
             stdout, stderr, exit_code = await _run_agent_browser(

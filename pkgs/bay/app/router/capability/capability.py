@@ -274,7 +274,8 @@ class CapabilityRouter:
                 sandbox_id=sandbox.id, cmd=cmd[:100],
             )
             return await self._shared_gull.exec_browser(
-                cmd, sandbox_id=sandbox.id, timeout=timeout,
+                cmd, sandbox_id=sandbox.id, cargo_id=sandbox.cargo_id,
+                timeout=timeout,
             )
 
         session = await self.ensure_session(sandbox)
@@ -305,7 +306,8 @@ class CapabilityRouter:
                 sandbox_id=sandbox.id, n_cmds=len(commands),
             )
             results = await self._shared_gull.exec_browser_batch(
-                commands, sandbox_id=sandbox.id, timeout=timeout,
+                commands, sandbox_id=sandbox.id, cargo_id=sandbox.cargo_id,
+                timeout=timeout,
                 stop_on_error=stop_on_error,
             )
             return {

@@ -82,6 +82,21 @@ class K8sDriver(Driver):
         settings = get_settings()
         k8s_cfg = settings.driver.k8s
 
+        # Shared browser service is not supported on Kubernetes — each Pod
+        # has its own PVC and one Pod cannot mount another's PVC.  Fail fast
+        # with a clear message at startup rather than silently misbehaving.
+        # Only check real Settings instances (skip MagicMock in tests).
+        from app.config import Settings as SettingsType
+        if isinstance(settings, SettingsType):
+            bs = settings.browser_service
+            if bs is not None and bs.enabled:
+                raise RuntimeError(
+                    "Shared browser service (browser_service.enabled=true) is not "
+                    "supported on Kubernetes.  Use per-sandbox browser containers "
+                    "(sidecar in each Pod) instead.  Set browser_service.enabled=false "
+                    "in your Bay config."
+                )
+
         self._namespace = k8s_cfg.namespace
         self._kubeconfig = k8s_cfg.kubeconfig
         self._storage_class = k8s_cfg.storage_class

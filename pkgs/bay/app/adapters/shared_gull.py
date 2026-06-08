@@ -103,6 +103,7 @@ class SharedGullAdapter(BaseAdapter):
         cmd: str,
         *,
         sandbox_id: str,
+        cargo_id: str | None = None,
         timeout: float | None = None,
     ) -> ExecutionResult:
         """Execute a browser command via the shared Gull Service.
@@ -110,31 +111,32 @@ class SharedGullAdapter(BaseAdapter):
         Args:
             cmd: agent-browser command (without 'agent-browser' prefix).
             sandbox_id: Target sandbox for session isolation.
+            cargo_id: Cargo volume ID for path translation (shared mode).
             timeout: Per-command timeout in seconds.
         """
         t = timeout or self._timeout
         client = _get_client()
 
+        body: dict[str, Any] = {
+            "cmd": cmd,
+            "sandbox_id": sandbox_id,
+            "timeout": int(t),
+        }
+        if cargo_id:
+            body["cargo_id"] = cargo_id
+
         try:
             if client is not None:
                 resp = await client.post(
                     f"{self._endpoint}/exec",
-                    json={
-                        "cmd": cmd,
-                        "sandbox_id": sandbox_id,
-                        "timeout": int(t),
-                    },
+                    json=body,
                     timeout=t + 10,
                 )
             else:
                 async with httpx.AsyncClient() as tmp:
                     resp = await tmp.post(
                         f"{self._endpoint}/exec",
-                        json={
-                            "cmd": cmd,
-                            "sandbox_id": sandbox_id,
-                            "timeout": int(t),
-                        },
+                        json=body,
                         timeout=t + 10,
                     )
 
@@ -169,6 +171,7 @@ class SharedGullAdapter(BaseAdapter):
         commands: list[str],
         *,
         sandbox_id: str,
+        cargo_id: str | None = None,
         timeout: float | None = None,
         stop_on_error: bool = True,
     ) -> list[ExecutionResult]:
@@ -176,7 +179,8 @@ class SharedGullAdapter(BaseAdapter):
         results: list[ExecutionResult] = []
         for cmd in commands:
             result = await self.exec_browser(
-                cmd, sandbox_id=sandbox_id, timeout=timeout
+                cmd, sandbox_id=sandbox_id, cargo_id=cargo_id,
+                timeout=timeout,
             )
             results.append(result)
             if stop_on_error and not result.success:

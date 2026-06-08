@@ -178,19 +178,29 @@ class GullAdapter(BaseAdapter):
         cmd: str,
         *,
         timeout: int = 30,
+        sandbox_id: str | None = None,
+        cargo_id: str | None = None,
     ) -> ExecutionResult:
         """Execute an agent-browser command via Gull.
 
         Args:
             cmd: agent-browser command without prefix (e.g., "open https://example.com")
             timeout: timeout seconds
+            sandbox_id: sandbox ID for shared-mode session isolation
+            cargo_id: cargo volume ID for shared-mode path translation
 
         Returns:
             ExecutionResult: stdout in output, stderr in error.
         """
+        body: dict[str, Any] = {"cmd": cmd, "timeout": timeout}
+        if sandbox_id:
+            body["sandbox_id"] = sandbox_id
+        if cargo_id:
+            body["cargo_id"] = cargo_id
+
         result = await self._post(
             "/exec",
-            {"cmd": cmd, "timeout": timeout},
+            body,
             timeout=float(timeout + 5),
         )
 
@@ -218,6 +228,8 @@ class GullAdapter(BaseAdapter):
         *,
         timeout: int = 60,
         stop_on_error: bool = True,
+        sandbox_id: str | None = None,
+        cargo_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a batch of agent-browser commands via Gull.
 
@@ -225,17 +237,25 @@ class GullAdapter(BaseAdapter):
             commands: List of agent-browser commands without prefix
             timeout: Overall timeout seconds for all commands
             stop_on_error: Whether to stop on first failure
+            sandbox_id: sandbox ID for shared-mode session isolation
+            cargo_id: cargo volume ID for shared-mode path translation
 
         Returns:
             Raw batch result dict from Gull /exec_batch endpoint.
         """
+        body: dict[str, Any] = {
+            "commands": commands,
+            "timeout": timeout,
+            "stop_on_error": stop_on_error,
+        }
+        if sandbox_id:
+            body["sandbox_id"] = sandbox_id
+        if cargo_id:
+            body["cargo_id"] = cargo_id
+
         result = await self._post(
             "/exec_batch",
-            {
-                "commands": commands,
-                "timeout": timeout,
-                "stop_on_error": stop_on_error,
-            },
+            body,
             timeout=float(timeout + 10),
         )
 

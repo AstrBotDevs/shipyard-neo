@@ -175,12 +175,46 @@ async def execute_browser(
     parts = ["agent-browser", "--cdp", str(CDP_PORT), "--session", sandbox_id]
     parts.extend(shlex.split(cmd))
 
+    return await _run_parts(parts, timeout=timeout)
+
+
+async def execute_browser_raw(
+    sandbox_id: str,
+    argv: list[str],
+    *,
+    cwd: str | None = None,
+    profile: str | None = None,
+    timeout: float = 30.0,
+) -> tuple[str, str, int]:
+    """Execute an agent-browser command from pre-built argv with custom cwd/profile.
+
+    Used by shared mode with cargo path translation — /workspace paths in
+    the incoming cmd have already been rewritten to per-sandbox cargo paths
+    by _translate_and_split().  We accept the pre-translated argv directly
+    and inject --cdp / --session / --profile.
+    """
+    parts = ["agent-browser", "--cdp", str(CDP_PORT), "--session", sandbox_id]
+    if profile:
+        parts.extend(["--profile", profile])
+    parts.extend(argv)
+
+    return await _run_parts(parts, timeout=timeout, cwd=cwd)
+
+
+async def _run_parts(
+    parts: list[str],
+    *,
+    timeout: float = 30.0,
+    cwd: str | None = None,
+) -> tuple[str, str, int]:
+    """Run agent-browser with given argv parts."""
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout,

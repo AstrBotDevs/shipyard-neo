@@ -39,15 +39,15 @@ class _SpyAdapter(BaseAdapter):
         )
         self._raise_on = raise_on or {}
 
-    async def exec_browser(self, cmd, sandbox_id=None, timeout=30):
-        self.exec_calls.append({"cmd": cmd, "sandbox_id": sandbox_id, "timeout": timeout})
+    async def exec_browser(self, cmd, sandbox_id=None, cargo_id=None, timeout=30):
+        self.exec_calls.append({"cmd": cmd, "sandbox_id": sandbox_id, "cargo_id": cargo_id, "timeout": timeout})
         if "exec_browser" in self._raise_on:
             raise self._raise_on["exec_browser"]
         return self._return_result
 
-    async def exec_browser_batch(self, commands, sandbox_id=None, timeout=60, stop_on_error=True):
+    async def exec_browser_batch(self, commands, sandbox_id=None, cargo_id=None, timeout=60, stop_on_error=True):
         self.exec_calls.append(
-            {"batch": commands, "sandbox_id": sandbox_id, "timeout": timeout}
+            {"batch": commands, "sandbox_id": sandbox_id, "cargo_id": cargo_id, "timeout": timeout}
         )
         return [self._return_result for _ in commands]
 

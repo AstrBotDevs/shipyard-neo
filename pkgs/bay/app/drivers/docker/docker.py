@@ -20,6 +20,8 @@ Note: runtime_port is provided by ProfileConfig (do not hardcode Ship port here)
 from __future__ import annotations
 
 import asyncio
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiodocker
@@ -459,49 +461,44 @@ class DockerDriver(Driver):
     # Volume management
 
     async def create_volume(self, name: str, labels: dict[str, str] | None = None) -> str:
-        """Create a Docker volume."""
-        client = await self._get_client()
-        self._log.info("docker.create_volume", name=name)
+        """Create a cargo directory and return the host path for Docker binds.
 
-        volume_labels = {"bay.managed": "true"}
-        if labels:
-            volume_labels.update(labels)
+        Cargo volumes are plain directories (bind mounts), not Docker named
+        volumes.  This lets the shared Gull service mount the cargo root and
+        access per-sandbox cargo subdirectories via /cargos/<cargo_id>.
 
-        volume = await client.volumes.create(
-            {
-                "Name": name,
-                "Labels": volume_labels,
-            }
-        )
-
-        # aiodocker returns DockerVolume object, get name from it
-        return volume.name
+        Uses ``cargo.host_root_path`` to create the directory — Docker Binds
+        always reference the **host** filesystem, not Bay's container fs.
+        """
+        settings = get_settings()
+        # Use host_root_path for Docker Binds; root_path is Bay's internal view.
+        host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
+        cargo_path = host_root / name
+        cargo_path.mkdir(parents=True, exist_ok=True)
+        self._log.info("docker.create_volume", name=name, path=str(cargo_path))
+        return str(cargo_path)
 
     async def delete_volume(self, name: str) -> None:
-        """Delete a Docker volume."""
-        client = await self._get_client()
-        self._log.info("docker.delete_volume", name=name)
-
-        try:
-            volume = await client.volumes.get(name)
-            await volume.delete()
-        except DockerError as e:
-            if e.status == 404:
-                self._log.warning("docker.delete_volume.not_found", name=name)
-            else:
-                raise
+        """Delete a cargo directory (name or absolute path)."""
+        cargo_path = Path(name)
+        # If name is relative (e.g. "bay-cargo-ws-xxx"), resolve it under
+        # the host root.  If it's already absolute, use it directly.
+        if not cargo_path.is_absolute():
+            settings = get_settings()
+            host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
+            cargo_path = host_root / name
+        self._log.info("docker.delete_volume", name=name, path=str(cargo_path))
+        if cargo_path.exists():
+            shutil.rmtree(cargo_path, ignore_errors=True)
 
     async def volume_exists(self, name: str) -> bool:
-        """Check if volume exists."""
-        client = await self._get_client()
-
-        try:
-            await client.volumes.get(name)
-            return True
-        except DockerError as e:
-            if e.status == 404:
-                return False
-            raise
+        """Check if cargo directory exists (name or absolute path)."""
+        cargo_path = Path(name)
+        if not cargo_path.is_absolute():
+            settings = get_settings()
+            host_root = Path(settings.cargo.host_root_path or settings.cargo.root_path)
+            cargo_path = host_root / name
+        return cargo_path.is_dir()
 
     # Runtime instance discovery (for GC)
 

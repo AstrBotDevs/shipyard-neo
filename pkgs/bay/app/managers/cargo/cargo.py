@@ -59,8 +59,9 @@ class CargoManager:
             managed=managed,
         )
 
-        # Create volume
-        await self._driver.create_volume(
+        # Create volume and use the driver-returned ref (host path for bind
+        # mounts, volume name for named volumes, PVC name for K8s).
+        driver_ref = await self._driver.create_volume(
             name=volume_name,
             labels={
                 "bay.owner": owner,
@@ -74,7 +75,7 @@ class CargoManager:
             id=cargo_id,
             owner=owner,
             backend="docker_volume",
-            driver_ref=volume_name,
+            driver_ref=driver_ref,
             managed=managed,
             managed_by_sandbox_id=managed_by_sandbox_id,
             size_limit_mb=size_limit_mb or self._settings.cargo.default_size_limit_mb,

@@ -354,10 +354,13 @@ class ProfileConfig(BaseModel):
 class CargoConfig(BaseModel):
     """Cargo storage configuration."""
 
-    # 宿主机路径，仅用于 Bay 管理，不暴露给运行时
+    # Path inside Bay container where cargo directories are created.
     root_path: str = "/var/lib/bay/cargos"
+    # Corresponding path on the Docker host (for bind-mount Binds).
+    # Only used by the Docker driver; K8s driver uses PVCs and ignores this.
+    host_root_path: str = "/var/lib/bay/cargos"
     default_size_limit_mb: int = 1024
-    # 容器内挂载路径 (固定)
+    # Mount path inside sandbox containers (fixed).
     mount_path: str = "/workspace"
 
 

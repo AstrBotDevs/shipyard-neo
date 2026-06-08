@@ -24,7 +24,8 @@ driver:
     host_port: null
 
 cargo:
-  root_path: "/var/lib/bay/cargos"
+  root_path: "/bay/cargos"
+  host_root_path: "/workspace/projects/shipyard-neo/dev/bay-cargos"
   default_size_limit_mb: 1024
   mount_path: "/workspace"
 
