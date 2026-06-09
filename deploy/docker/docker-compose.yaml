@@ -28,6 +28,8 @@ services:
       - GULL_MODE=shared
       - GULL_CDP_PORT=9222
       - AGENT_BROWSER_IDLE_TIMEOUT_MS=600000  # 10 min session GC
+    volumes:
+      - ./bay-cargos:/cargos:ro
     networks:
       - bay-network
 
@@ -44,8 +46,8 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # SQLite database persistence
       - bay-data:/app/data
-      # Cargo storage persistence
-      - bay-cargos:/var/lib/bay/cargos
+      # Cargo storage persistence (bind mount — shared with gull-service)
+      - ./bay-cargos:/var/lib/bay/cargos
     environment:
       - BAY_CONFIG_FILE=/app/config.yaml
       - BAY_DATA_DIR=/app/data
@@ -73,5 +75,3 @@ networks:
 volumes:
   bay-data:
     name: bay-data
-  bay-cargos:
-    name: bay-cargos
