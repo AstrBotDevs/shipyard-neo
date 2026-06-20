@@ -81,6 +81,11 @@ CHROMIUM_ARGS = [
     f"--remote-debugging-port={CDP_PORT}",
 ]
 
+CUSTOM_ARGS = os.environ.get("GULL_CHROMIUM_ARGS")
+
+if CUSTOM_ARGS:
+    CHROMIUM_ARGS.extend(shlex.split(CUSTOM_ARGS))
+
 _chromium: asyncio.subprocess.Process | None = None
 _chromium_lock: asyncio.Lock = asyncio.Lock()
 
