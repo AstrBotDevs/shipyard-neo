@@ -28,6 +28,7 @@ services:
       - GULL_MODE=shared
       - GULL_CDP_PORT=9222
       - AGENT_BROWSER_IDLE_TIMEOUT_MS=600000  # 10 min session GC
+      # - GULL_CHROMIUM_ARGS=--user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" #custom user-agent
     volumes:
       - ./bay-cargos:/cargos:ro
     networks:

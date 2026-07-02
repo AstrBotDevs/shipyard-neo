@@ -81,6 +81,21 @@ CHROMIUM_ARGS = [
     f"--remote-debugging-port={CDP_PORT}",
 ]
 
+CUSTOM_ARGS = os.environ.get("GULL_CHROMIUM_ARGS")
+if CUSTOM_ARGS:
+    try:
+        custom_args = shlex.split(CUSTOM_ARGS)
+        CHROMIUM_ARGS.extend(custom_args)
+        logger.info("[gull] Applied Chromium args: %s", custom_args)
+    except ValueError as e:
+        logger.exception(
+            "[gull] Invalid GULL_CHROMIUM_ARGS: '%s' — %s. Ignoring custom args.",
+            CUSTOM_ARGS,
+            e
+        )
+
+logger.info("[gull] Final Chromium arguments: %s", CHROMIUM_ARGS)
+
 _chromium: asyncio.subprocess.Process | None = None
 _chromium_lock: asyncio.Lock = asyncio.Lock()
 
