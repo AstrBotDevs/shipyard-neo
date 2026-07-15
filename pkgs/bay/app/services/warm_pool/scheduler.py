@@ -17,7 +17,7 @@ from sqlmodel import func, select
 
 from app.drivers.base import ContainerStatus
 from app.models.sandbox import Sandbox, WarmState
-from app.models.session import Session
+from app.models.session import Session, SessionStatus
 from app.utils.datetime import utcnow
 from app.utils.runtime_health import all_expected_runtimes_running
 
@@ -138,8 +138,9 @@ class WarmPoolScheduler:
         """Reconcile DB warm-pool state with actual runtime state.
 
         Available sandboxes are re-validated against the runtime backend. Pending
-        sandboxes are periodically submitted to the deduplicating warmup queue so
-        a task that failed after leaving the queue cannot block replenishment.
+        sandboxes without an active session, or with a failed/stopped session, are
+        submitted to the deduplicating warmup queue so a failed task cannot block
+        replenishment.
 
         Returns:
             Number of warm sandboxes requeued for recovery.
@@ -165,7 +166,13 @@ class WarmPoolScheduler:
             if sandbox.warm_state == WarmState.AVAILABLE.value
         ]
         pending_rows = [
-            (sandbox, session) for sandbox, session in warm_rows if sandbox.warm_state is None
+            (sandbox, session)
+            for sandbox, session in warm_rows
+            if sandbox.warm_state is None
+            and (
+                session is None
+                or session.observed_state in (SessionStatus.FAILED, SessionStatus.STOPPED)
+            )
         ]
 
         if not available_rows and not pending_rows:

@@ -336,6 +336,59 @@ class TestWarmPoolSchedulerReconcile:
         assert queue.enqueued == [(sandbox.id, sandbox.owner)]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "observed_state",
+        [SessionStatus.STARTING, SessionStatus.RUNNING],
+    )
+    async def test_reconcile_does_not_requeue_pending_sandbox_with_active_session(
+        self,
+        observed_state,
+        db_session,
+        driver,
+        monkeypatch,
+    ):
+        sandbox_mgr = SandboxManager(driver=driver, db_session=db_session)
+        sandbox = await sandbox_mgr.create_warm_sandbox(profile_id="python-default")
+
+        session = Session(
+            id=f"sess-warm-{observed_state.value}",
+            sandbox_id=sandbox.id,
+            profile_id="python-default",
+            container_id="warmup-container",
+            endpoint="http://warmup-runtime"
+            if observed_state == SessionStatus.RUNNING
+            else None,
+            observed_state=observed_state,
+            desired_state=SessionStatus.RUNNING,
+        )
+        db_session.add(session)
+        sandbox.current_session_id = session.id
+        await db_session.commit()
+
+        queue = _FakeWarmupQueue()
+        scheduler = WarmPoolScheduler(
+            config=SimpleNamespace(interval_seconds=60, run_on_startup=False),
+            warmup_queue=queue,
+        )
+
+        class _SessionFactory:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        monkeypatch.setattr(
+            "app.db.session.get_async_session",
+            lambda: _SessionFactory(),
+        )
+
+        reconciled = await scheduler._reconcile_profile_runtime_state("python-default")
+
+        assert reconciled == 0
+        assert queue.enqueued == []
+
+    @pytest.mark.asyncio
     async def test_reconcile_requeues_available_sandbox_when_runtime_missing(
         self,
         db_session,
