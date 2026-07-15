@@ -467,6 +467,41 @@ class TestOrphanCargoGC:
         task._cargo_mgr.delete_internal_by_id.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_orphan_cargo_deletes_when_only_exited_runtime_references_volume(
+        self,
+    ):
+        """Exited runtimes must not keep orphan cargo alive indefinitely."""
+        from app.services.gc.tasks.orphan_cargo import OrphanCargoGC
+        from tests.fakes import FakeDriver
+
+        driver = FakeDriver()
+        driver.list_runtime_instances = AsyncMock(
+            return_value=[
+                RuntimeInstance(
+                    id="container-exited",
+                    name="bay-session-sess-old",
+                    labels={
+                        "bay.cargo_id": "ws-orphan-1",
+                        "bay.managed": "true",
+                    },
+                    state="exited",
+                )
+            ]
+        )
+        db_session = AsyncMock()
+
+        task = OrphanCargoGC(driver, db_session)
+        task._find_orphans = AsyncMock(return_value=["ws-orphan-1"])
+        task._cargo_mgr = MagicMock()
+        task._cargo_mgr.delete_internal_by_id = AsyncMock()
+
+        result = await task.run()
+
+        assert result.cleaned_count == 1
+        assert result.skipped_count == 0
+        task._cargo_mgr.delete_internal_by_id.assert_awaited_once_with("ws-orphan-1")
+
+    @pytest.mark.asyncio
     async def test_orphan_cargo_no_orphans(self):
         """Should handle case when no orphan cargos are found."""
         from tests.fakes import FakeDriver

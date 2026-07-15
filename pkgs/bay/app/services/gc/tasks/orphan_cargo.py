@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
+_TERMINAL_RUNTIME_STATES = frozenset({"dead", "exited", "failed", "succeeded"})
+
 
 class OrphanCargoGC(GCTask):
     """GC task for cleaning up orphan managed cargos.
@@ -88,10 +90,11 @@ class OrphanCargoGC(GCTask):
         return result
 
     async def _has_runtime_references(self, cargo_id: str) -> bool:
-        """Check whether any runtime instance still references the cargo.
+        """Check whether any active runtime instance still references the cargo.
 
-        Conservative by design: if any runtime instance still carries the cargo label,
-        skip deletion for this GC cycle and let a later cycle retry after runtime cleanup.
+        Stopped containers and completed pods retain labels until they are removed, but no
+        longer use the cargo. Unknown or transitional states remain conservative and keep
+        the cargo until a later GC cycle.
         """
         instances = await self._driver.list_runtime_instances(
             labels={
@@ -99,7 +102,10 @@ class OrphanCargoGC(GCTask):
                 "bay.managed": "true",
             }
         )
-        return len(instances) > 0
+        return any(
+            instance.state.lower() not in _TERMINAL_RUNTIME_STATES
+            for instance in instances
+        )
 
     async def _find_orphans(self) -> list[str]:
         """Find orphan managed cargo IDs."""
