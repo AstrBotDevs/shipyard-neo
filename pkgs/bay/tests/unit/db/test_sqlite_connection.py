@@ -30,7 +30,7 @@ async def test_file_sqlite_uses_wal_and_busy_timeout(tmp_path, monkeypatch):
             busy_timeout = await connection.scalar(text("PRAGMA busy_timeout"))
 
         assert journal_mode == "wal"
-        assert synchronous == 1
+        assert synchronous == 2
         assert busy_timeout == 30_000
     finally:
         await db_session.close_db()
