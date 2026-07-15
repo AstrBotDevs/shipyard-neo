@@ -95,7 +95,7 @@ class TestMarkWarmAvailable:
 
         fixed_now = utcnow()
         with patch("app.managers.sandbox.sandbox.utcnow", return_value=fixed_now):
-            await sandbox_mgr.mark_warm_available(sandbox.id, warm_rotate_ttl=1800)
+            marked = await sandbox_mgr.mark_warm_available(sandbox.id, warm_rotate_ttl=1800)
 
         # Refetch
         result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox.id))
@@ -104,6 +104,26 @@ class TestMarkWarmAvailable:
         assert updated.warm_state == WarmState.AVAILABLE.value
         assert updated.warm_ready_at == fixed_now
         assert updated.warm_rotate_at == fixed_now + timedelta(seconds=1800)
+        assert marked is True
+
+    @pytest.mark.asyncio
+    async def test_mark_available_does_not_revive_retiring_sandbox(
+        self,
+        sandbox_mgr,
+        db_session,
+    ):
+        sandbox = await sandbox_mgr.create_warm_sandbox(profile_id="python-default")
+        await sandbox_mgr.mark_warm_available(sandbox.id)
+        await sandbox_mgr.mark_warm_retiring(sandbox.id)
+
+        marked = await sandbox_mgr.mark_warm_available(sandbox.id)
+
+        sandbox_id = sandbox.id
+        db_session.expire_all()
+        result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox_id))
+        updated = result.scalars().one()
+        assert marked is False
+        assert updated.warm_state == WarmState.RETIRING.value
 
 
 class TestClaimWarmSandbox:

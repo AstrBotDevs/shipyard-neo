@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import structlog
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -834,7 +835,11 @@ class SandboxManager:
 
         return sandbox
 
-    async def mark_warm_available(self, sandbox_id: str, warm_rotate_ttl: int = 1800) -> None:
+    async def mark_warm_available(
+        self,
+        sandbox_id: str,
+        warm_rotate_ttl: int = 1800,
+    ) -> bool:
         """Mark a warm sandbox as available (warmup completed).
 
         Called by the warmup queue worker after successful ensure_running().
@@ -842,33 +847,41 @@ class SandboxManager:
         Args:
             sandbox_id: Sandbox ID to mark
             warm_rotate_ttl: Seconds until rotation
+
+        Returns:
+            True when a pending warm sandbox was marked available.
         """
         now = utcnow()
+        rotate_at = now + timedelta(seconds=warm_rotate_ttl)
         result = await self._db.execute(
-            select(Sandbox).where(
+            update(Sandbox)
+            .where(
                 Sandbox.id == sandbox_id,
+                Sandbox.deleted_at.is_(None),
                 Sandbox.is_warm_pool.is_(True),
+                Sandbox.warm_state.is_(None),
+            )
+            .values(
+                warm_state=WarmState.AVAILABLE.value,
+                warm_ready_at=now,
+                warm_rotate_at=rotate_at,
             )
         )
-        sandbox = result.scalars().first()
+        await self._db.commit()
 
-        if sandbox is None:
-            self._log.warning(
-                "sandbox.mark_warm_available.not_found",
+        if result.rowcount != 1:
+            self._log.debug(
+                "sandbox.mark_warm_available.skipped",
                 sandbox_id=sandbox_id,
             )
-            return
-
-        sandbox.warm_state = WarmState.AVAILABLE.value
-        sandbox.warm_ready_at = now
-        sandbox.warm_rotate_at = now + timedelta(seconds=warm_rotate_ttl)
-        await self._db.commit()
+            return False
 
         self._log.info(
             "sandbox.warm_available",
             sandbox_id=sandbox_id,
-            warm_rotate_at=sandbox.warm_rotate_at.isoformat(),
+            warm_rotate_at=rotate_at.isoformat(),
         )
+        return True
 
     async def mark_warm_retiring(self, sandbox_id: str) -> None:
         """Mark a warm sandbox as retiring (prevent it from being claimed).

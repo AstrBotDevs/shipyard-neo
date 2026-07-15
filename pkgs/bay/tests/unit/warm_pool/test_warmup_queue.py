@@ -5,14 +5,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 
 from app.config import WarmPoolConfig
 from app.managers.sandbox import SandboxManager
 from app.models.cargo import Cargo
-from app.models.sandbox import Sandbox
+from app.models.sandbox import Sandbox, WarmState
 from app.models.session import Session, SessionStatus
 from app.services.warm_pool.queue import WarmupQueue
 from tests.fakes import FakeDriver
@@ -250,3 +251,85 @@ class TestWarmupQueueRecovery:
 
         ensure_running_mock.assert_awaited_once()
         assert queue.stats.success_total == 1
+
+    @pytest.mark.asyncio
+    async def test_process_task_marks_available_after_reconcile_resets_stale_state(
+        self,
+        db_session: AsyncSession,
+        driver: FakeDriver,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        config = _make_config()
+        queue = WarmupQueue(config=config)
+
+        cargo = Cargo(
+            id="cargo-recovery-race",
+            owner="warm-pool",
+            managed=True,
+            driver_ref="vol-cargo-recovery-race",
+        )
+        sandbox = Sandbox(
+            id="sandbox-recovery-race",
+            owner="warm-pool",
+            profile_id="python-default",
+            cargo_id=cargo.id,
+            is_warm_pool=True,
+            warm_state=WarmState.AVAILABLE.value,
+        )
+        session = Session(
+            id="sess-recovery-race",
+            sandbox_id=sandbox.id,
+            profile_id="python-default",
+            container_id="replacement-container",
+            endpoint="http://replacement-runtime",
+            observed_state=SessionStatus.RUNNING,
+            desired_state=SessionStatus.RUNNING,
+        )
+        sandbox.current_session_id = session.id
+
+        db_session.add(cargo)
+        db_session.add(sandbox)
+        db_session.add(session)
+        await db_session.commit()
+
+        class _SessionFactory:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        monkeypatch.setattr(
+            "app.db.session.get_async_session",
+            lambda: _SessionFactory(),
+        )
+        monkeypatch.setattr("app.api.dependencies.get_driver", lambda: driver)
+
+        async def _ensure_running(_manager, loaded_sandbox):
+            assert loaded_sandbox.warm_state == WarmState.AVAILABLE.value
+            await db_session.execute(
+                update(Sandbox)
+                .where(Sandbox.id == loaded_sandbox.id)
+                .values(
+                    warm_state=None,
+                    warm_ready_at=None,
+                    warm_rotate_at=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await db_session.commit()
+            assert loaded_sandbox.warm_state == WarmState.AVAILABLE.value
+            return session
+
+        monkeypatch.setattr(SandboxManager, "ensure_running", _ensure_running)
+
+        await queue._process_task(
+            task=type("Task", (), {"sandbox_id": sandbox.id, "owner": sandbox.owner})(),
+            worker_id=0,
+        )
+
+        sandbox_id = sandbox.id
+        db_session.expire_all()
+        result = await db_session.execute(select(Sandbox).where(Sandbox.id == sandbox_id))
+        updated_sandbox = result.scalars().one()
+        assert updated_sandbox.warm_state == WarmState.AVAILABLE.value
