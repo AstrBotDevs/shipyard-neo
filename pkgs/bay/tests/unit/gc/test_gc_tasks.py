@@ -475,19 +475,19 @@ class TestOrphanCargoGC:
         from tests.fakes import FakeDriver
 
         driver = FakeDriver()
-        driver.list_runtime_instances = AsyncMock(
-            return_value=[
-                RuntimeInstance(
-                    id="container-exited",
-                    name="bay-session-sess-old",
-                    labels={
-                        "bay.cargo_id": "ws-orphan-1",
-                        "bay.managed": "true",
-                    },
-                    state="exited",
-                )
-            ]
+        exited_instance = RuntimeInstance(
+            id="container-exited",
+            name="bay-session-sess-old",
+            labels={
+                "bay.cargo_id": "ws-orphan-1",
+                "bay.managed": "true",
+            },
+            state="exited",
         )
+        driver.list_runtime_instances = AsyncMock(
+            side_effect=[[exited_instance], []]
+        )
+        driver.destroy_runtime_instance = AsyncMock()
         db_session = AsyncMock()
 
         task = OrphanCargoGC(driver, db_session)
@@ -499,7 +499,46 @@ class TestOrphanCargoGC:
 
         assert result.cleaned_count == 1
         assert result.skipped_count == 0
+        driver.destroy_runtime_instance.assert_awaited_once_with("container-exited")
         task._cargo_mgr.delete_internal_by_id.assert_awaited_once_with("ws-orphan-1")
+
+    @pytest.mark.asyncio
+    async def test_orphan_cargo_rechecks_references_after_terminal_cleanup(self):
+        """A new active reference discovered after cleanup must preserve cargo."""
+        from app.services.gc.tasks.orphan_cargo import OrphanCargoGC
+        from tests.fakes import FakeDriver
+
+        labels = {"bay.cargo_id": "ws-orphan-1", "bay.managed": "true"}
+        exited_instance = RuntimeInstance(
+            id="container-exited",
+            name="bay-session-sess-old",
+            labels=labels,
+            state="exited",
+        )
+        running_instance = RuntimeInstance(
+            id="container-running",
+            name="bay-session-sess-new",
+            labels=labels,
+            state="running",
+        )
+        driver = FakeDriver()
+        driver.list_runtime_instances = AsyncMock(
+            side_effect=[[exited_instance], [running_instance]]
+        )
+        driver.destroy_runtime_instance = AsyncMock()
+        db_session = AsyncMock()
+
+        task = OrphanCargoGC(driver, db_session)
+        task._find_orphans = AsyncMock(return_value=["ws-orphan-1"])
+        task._cargo_mgr = MagicMock()
+        task._cargo_mgr.delete_internal_by_id = AsyncMock()
+
+        result = await task.run()
+
+        assert result.cleaned_count == 0
+        assert result.skipped_count == 1
+        driver.destroy_runtime_instance.assert_awaited_once_with("container-exited")
+        task._cargo_mgr.delete_internal_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_orphan_cargo_no_orphans(self):

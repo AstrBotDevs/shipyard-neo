@@ -93,19 +93,39 @@ class OrphanCargoGC(GCTask):
         """Check whether any active runtime instance still references the cargo.
 
         Stopped containers and completed pods retain labels until they are removed, but no
-        longer use the cargo. Unknown or transitional states remain conservative and keep
-        the cargo until a later GC cycle.
+        longer use the cargo. Remove those terminal runtime objects, then query again before
+        allowing cargo deletion. Unknown or transitional states remain conservative.
         """
-        instances = await self._driver.list_runtime_instances(
+        labels = {
+            "bay.cargo_id": cargo_id,
+            "bay.managed": "true",
+        }
+        instances = await self._driver.list_runtime_instances(labels=labels)
+        if any(
+            instance.state.lower() not in _TERMINAL_RUNTIME_STATES
+            for instance in instances
+        ):
+            return True
+
+        for instance in instances:
+            self._log.info(
+                "gc.orphan_cargo.remove_terminal_runtime",
+                cargo_id=cargo_id,
+                runtime_id=instance.id,
+                runtime_state=instance.state,
+            )
+            await self._driver.destroy_runtime_instance(instance.id)
+
+        if not instances:
+            return False
+
+        remaining = await self._driver.list_runtime_instances(
             labels={
                 "bay.cargo_id": cargo_id,
                 "bay.managed": "true",
             }
         )
-        return any(
-            instance.state.lower() not in _TERMINAL_RUNTIME_STATES
-            for instance in instances
-        )
+        return bool(remaining)
 
     async def _find_orphans(self) -> list[str]:
         """Find orphan managed cargo IDs."""
