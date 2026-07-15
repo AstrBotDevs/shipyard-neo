@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
@@ -22,17 +22,42 @@ logger = structlog.get_logger()
 _engine = None
 _async_session_factory = None
 
+_SQLITE_BUSY_TIMEOUT_SECONDS = 30
+_SQLITE_BUSY_TIMEOUT_MS = _SQLITE_BUSY_TIMEOUT_SECONDS * 1000
+
+
+def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    """Configure persistent SQLite connections for concurrent Bay tasks."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=FULL")
+    finally:
+        cursor.close()
+
 
 def _get_engine():
     """Get or create the async engine."""
     global _engine
     if _engine is None:
         settings = get_settings()
+        is_sqlite = settings.database.url.startswith("sqlite")
+        connect_args = (
+            {"timeout": _SQLITE_BUSY_TIMEOUT_SECONDS} if is_sqlite else {}
+        )
         _engine = create_async_engine(
             settings.database.url,
             echo=settings.database.echo,
             future=True,
+            connect_args=connect_args,
         )
+        if is_sqlite:
+            event.listen(
+                _engine.sync_engine,
+                "connect",
+                _configure_sqlite_connection,
+            )
     return _engine
 
 
