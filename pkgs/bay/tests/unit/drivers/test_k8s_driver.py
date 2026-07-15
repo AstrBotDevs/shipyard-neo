@@ -284,6 +284,22 @@ class TestK8sDriverListRuntimeInstances:
 
                 assert len(instances) == 0
 
+    @pytest.mark.asyncio
+    async def test_list_runtime_instances_propagates_api_error(self, driver):
+        """A backend failure must not be reported as an empty runtime set."""
+        mock_v1 = AsyncMock()
+        mock_v1.list_namespaced_pod.side_effect = ApiException(
+            status=503,
+            reason="API unavailable",
+        )
+
+        with patch.object(driver, "_get_api_client") as mock_client:
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                mock_client.return_value = MagicMock()
+
+                with pytest.raises(ApiException, match="API unavailable"):
+                    await driver.list_runtime_instances(labels={"bay.managed": "true"})
+
 
 class TestK8sDriverDestroyRuntimeInstance:
     """Test that Pod deletion is complete before a same-name rebuild."""

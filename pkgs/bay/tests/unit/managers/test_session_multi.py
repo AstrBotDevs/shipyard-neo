@@ -18,7 +18,7 @@ from app.errors import SessionNotReadyError
 from app.managers.session.session import SessionManager
 from app.models.cargo import Cargo
 from app.models.session import Session, SessionStatus
-from tests.fakes import FakeDriver
+from tests.fakes import FakeContainerState, FakeDriver
 
 
 def _multi_profile() -> ProfileConfig:
@@ -167,6 +167,103 @@ class TestMultiContainerEnsureRunning:
         ship_container = next(c for c in session.containers if c["name"] == "ship")
         assert session.endpoint == ship_container["endpoint"]
         assert session.container_id == ship_container["container_id"]
+
+    @pytest.mark.asyncio
+    async def test_recovers_incomplete_starting_runtime_group(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi", cargo, profile)
+        session.observed_state = SessionStatus.STARTING
+        session.desired_state = SessionStatus.RUNNING
+        await db_session.commit()
+
+        await driver.create_session_network(session.id)
+        driver._containers["stale-ship"] = FakeContainerState(
+            container_id="stale-ship",
+            session_id=session.id,
+            profile_id=profile.id,
+            cargo_id=cargo.id,
+        )
+        driver._containers["stale-gull"] = FakeContainerState(
+            container_id="stale-gull",
+            session_id=session.id,
+            profile_id=profile.id,
+            cargo_id=cargo.id,
+        )
+
+        recovered = await mgr.ensure_running(session, cargo, profile)
+
+        assert recovered.observed_state == SessionStatus.RUNNING
+        assert recovered.containers is not None
+        assert len(recovered.containers) == 2
+        assert "stale-ship" not in driver._containers
+        assert "stale-gull" not in driver._containers
+        assert driver.remove_network_calls == [session.id]
+        assert driver.create_network_calls == [session.id, session.id]
+        assert len(driver.create_multi_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_keeps_multi_starting_state_when_runtime_discovery_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        driver: FakeDriver,
+        db_session: AsyncSession,
+        cargo: Cargo,
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi-probe-error", cargo, profile)
+        session.observed_state = SessionStatus.STARTING
+        session.desired_state = SessionStatus.RUNNING
+        await db_session.commit()
+
+        async def _raise_runtime_discovery_error(*, labels):
+            raise RuntimeError("runtime backend unavailable")
+
+        monkeypatch.setattr(driver, "list_runtime_instances", _raise_runtime_discovery_error)
+
+        with pytest.raises(SessionNotReadyError, match="Session is starting"):
+            await mgr.ensure_running(session, cargo, profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.STARTING
+        assert session.container_id is None
+        assert not hasattr(driver, "create_multi_calls")
+
+    @pytest.mark.asyncio
+    async def test_finishes_starting_session_when_complete_runtime_group_is_running(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi-running", cargo, profile)
+        session = await mgr.ensure_running(session, cargo, profile)
+
+        original_container_id = session.container_id
+        original_endpoint = session.endpoint
+        original_containers = [dict(container) for container in session.containers or []]
+        session.observed_state = SessionStatus.STARTING
+        await db_session.commit()
+
+        recovered = await mgr.ensure_running(session, cargo, profile)
+
+        assert recovered.observed_state == SessionStatus.RUNNING
+        assert recovered.container_id == original_container_id
+        assert recovered.endpoint == original_endpoint
+        assert recovered.containers == original_containers
+        assert len(driver.create_multi_calls) == 1
+        assert len(driver.start_multi_calls) == 1
 
     @pytest.mark.asyncio
     async def test_multi_container_idempotent(

@@ -617,7 +617,7 @@ class K8sDriver(Driver):
             )
         except ApiException:
             self._log.exception("k8s.list_runtime_instances.failed")
-            return []
+            raise
 
         instances = []
         for pod in pod_list.items:
@@ -692,8 +692,7 @@ class K8sDriver(Driver):
             await asyncio.sleep(1)
 
         raise RuntimeError(
-            f"Pod {instance_id} was not deleted within "
-            f"{self._pod_startup_timeout} seconds"
+            f"Pod {instance_id} was not deleted within {self._pod_startup_timeout} seconds"
         )
 
     # ================================================================
