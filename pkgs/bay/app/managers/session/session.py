@@ -27,6 +27,7 @@ from app.models.cargo import Cargo
 from app.models.session import Session, SessionStatus
 from app.services.http import http_client_manager
 from app.utils.datetime import utcnow
+from app.utils.runtime_health import all_expected_runtimes_running
 
 logger = structlog.get_logger()
 
@@ -792,8 +793,11 @@ class SessionManager:
             live_runtime_count=len(live_instances),
         )
 
-        has_live_runtime = len(live_instances) > 0
-        if has_live_runtime:
+        runtime_group_healthy = all_expected_runtimes_running(
+            session.containers or [],
+            instances,
+        )
+        if runtime_group_healthy:
             self._log.debug(
                 "session.multi_probe.healthy",
                 session_id=session.id,
@@ -802,14 +806,73 @@ class SessionManager:
             )
             return session
 
+        expected_container_ids_set = {
+            container_id
+            for container_id in expected_container_ids
+            if isinstance(container_id, str) and container_id
+        }
+        live_runtime_ids = {instance.id for instance in live_instances}
         self._log.warning(
-            "session.multi_runtime_dead_detected",
+            "session.multi_runtime_unhealthy_detected",
             session_id=session.id,
             sandbox_id=session.sandbox_id,
             expected_container_names=expected_container_names,
             expected_container_ids=expected_container_ids,
+            missing_runtime_ids=sorted(expected_container_ids_set - live_runtime_ids),
             runtime_count=len(instances),
         )
+
+        cleanup_failures: list[dict[str, str]] = []
+        for instance in instances:
+            try:
+                await self._driver.destroy_runtime_instance(instance.id)
+            except Exception as cleanup_error:
+                cleanup_failures.append(
+                    {
+                        "operation": "destroy_runtime",
+                        "resource_id": instance.id,
+                        "error": str(cleanup_error),
+                    }
+                )
+                self._log.warning(
+                    "session.multi_recovery.destroy_runtime_failed",
+                    session_id=session.id,
+                    sandbox_id=session.sandbox_id,
+                    runtime_id=instance.id,
+                    runtime_name=instance.name,
+                    runtime_state=instance.state,
+                    error=str(cleanup_error),
+                )
+
+        try:
+            await self._driver.remove_session_network(session.id)
+        except Exception as cleanup_error:
+            cleanup_failures.append(
+                {
+                    "operation": "remove_network",
+                    "resource_id": session.id,
+                    "error": str(cleanup_error),
+                }
+            )
+            self._log.warning(
+                "session.multi_recovery.remove_network_failed",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                error=str(cleanup_error),
+            )
+
+        if cleanup_failures:
+            self._log.warning(
+                "session.multi_recovery.cleanup_incomplete",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                failures=cleanup_failures,
+            )
+            raise SessionNotReadyError(
+                message="Multi-container cleanup is incomplete",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            )
 
         old_primary_container_id = session.container_id
         old_endpoint = session.endpoint

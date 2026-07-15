@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kubernetes_asyncio.client import ApiException
 
 from app.drivers.base import ContainerStatus
 from app.drivers.k8s.k8s import K8sDriver, _parse_memory, _parse_storage_size
@@ -282,6 +283,55 @@ class TestK8sDriverListRuntimeInstances:
                 instances = await driver.list_runtime_instances(labels={"bay.managed": "true"})
 
                 assert len(instances) == 0
+
+
+class TestK8sDriverDestroyRuntimeInstance:
+    """Test that Pod deletion is complete before a same-name rebuild."""
+
+    @pytest.fixture
+    def driver(self):
+        with patch("app.drivers.k8s.k8s.get_settings") as mock_settings:
+            mock_k8s_cfg = MagicMock()
+            mock_k8s_cfg.namespace = "bay"
+            mock_k8s_cfg.kubeconfig = None
+            mock_k8s_cfg.storage_class = None
+            mock_k8s_cfg.default_storage_size = "1Gi"
+            mock_k8s_cfg.image_pull_secrets = []
+            mock_k8s_cfg.pod_startup_timeout = 2
+            mock_k8s_cfg.label_prefix = "bay"
+
+            mock_driver_cfg = MagicMock()
+            mock_driver_cfg.k8s = mock_k8s_cfg
+            mock_settings.return_value.driver = mock_driver_cfg
+
+            return K8sDriver()
+
+    @pytest.mark.asyncio
+    async def test_destroy_waits_until_pod_is_absent(self, driver):
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_pod.side_effect = [
+            MagicMock(),
+            ApiException(status=404),
+        ]
+
+        with patch.object(driver, "_get_api_client", return_value=MagicMock()):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.asyncio.sleep", new=AsyncMock()):
+                    await driver.destroy_runtime_instance("bay-session-test")
+
+        mock_v1.delete_namespaced_pod.assert_awaited_once()
+        assert mock_v1.read_namespaced_pod.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_destroy_raises_when_pod_does_not_disappear(self, driver):
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_pod.return_value = MagicMock()
+
+        with patch.object(driver, "_get_api_client", return_value=MagicMock()):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.asyncio.sleep", new=AsyncMock()):
+                    with pytest.raises(RuntimeError, match="was not deleted"):
+                        await driver.destroy_runtime_instance("bay-session-test")
 
 
 class TestK8sDriverVolumeOperations:
