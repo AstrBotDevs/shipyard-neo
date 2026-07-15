@@ -9,7 +9,7 @@ and recovery).
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -126,6 +126,254 @@ class TestSessionManagerEnsureRunning:
         assert refreshed.endpoint is None
 
         assert driver.destroy_calls == ["fake-container-1"]
+
+    async def test_start_failure_preserves_container_reference_when_cleanup_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = StartFailDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-start-cleanup", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-start-cleanup",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.PENDING,
+            observed_state=SessionStatus.PENDING,
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+        monkeypatch.setattr(
+            driver,
+            "destroy",
+            AsyncMock(side_effect=RuntimeError("cleanup failed")),
+        )
+        monkeypatch.setattr(manager, "_wait_for_ready", AsyncMock(return_value=None))
+
+        with pytest.raises(SessionNotReadyError, match="cleanup"):
+            await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.FAILED
+        assert session.container_id == "fake-container-1"
+        assert session.endpoint is None
+
+    async def test_recovers_starting_session_when_container_is_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-starting-missing", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-starting-missing",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.STARTING,
+            container_id="missing-container",
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+
+        driver.set_status_override(
+            "missing-container",
+            ContainerInfo(
+                container_id="missing-container",
+                status=ContainerStatus.NOT_FOUND,
+            ),
+        )
+        monkeypatch.setattr(manager, "_wait_for_ready", AsyncMock(return_value=None))
+
+        result = await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        assert result.observed_state == SessionStatus.RUNNING
+        assert result.container_id == "fake-container-1"
+        assert result.endpoint == "http://fake-host:8123"
+        assert driver.destroy_calls == ["missing-container"]
+        assert len(driver.create_calls) == 1
+        assert driver.start_calls == [{"container_id": "fake-container-1", "runtime_port": 8123}]
+
+    async def test_resumes_starting_session_when_container_is_created(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-starting-created", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-starting-created",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.STARTING,
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+
+        session.container_id = await driver.create(session=session, profile=profile, cargo=cargo)
+        driver.create_calls.clear()
+        await db_session.commit()
+        monkeypatch.setattr(manager, "_wait_for_ready", AsyncMock(return_value=None))
+
+        result = await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        assert result.observed_state == SessionStatus.RUNNING
+        assert result.container_id == "fake-container-1"
+        assert result.endpoint == "http://fake-host:8123"
+        assert driver.create_calls == []
+        assert driver.destroy_calls == []
+        assert driver.start_calls == [{"container_id": "fake-container-1", "runtime_port": 8123}]
+
+    async def test_finishes_starting_session_when_container_is_running(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-starting-running", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-starting-running",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.STARTING,
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+
+        session.container_id = await driver.create(session=session, profile=profile, cargo=cargo)
+        await driver.start(session.container_id, runtime_port=8123)
+        driver.create_calls.clear()
+        driver.start_calls.clear()
+        await db_session.commit()
+        wait_for_ready = AsyncMock(return_value=None)
+        monkeypatch.setattr(manager, "_wait_for_ready", wait_for_ready)
+
+        result = await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        assert result.observed_state == SessionStatus.RUNNING
+        assert result.container_id == "fake-container-1"
+        assert result.endpoint == "http://fake-host:8123"
+        assert driver.create_calls == []
+        assert driver.start_calls == []
+        wait_for_ready.assert_awaited_once_with(
+            "http://fake-host:8123",
+            session_id=session.id,
+            sandbox_id=sandbox.id,
+            runtime_type=session.runtime_type,
+        )
+
+    async def test_keeps_starting_session_when_runtime_probe_fails(
+        self,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(
+            id="sandbox-starting-probe-error", owner="test-user", profile_id=profile.id
+        )
+        session = Session(
+            id="sess-starting-probe-error",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.STARTING,
+            container_id="unreachable-container",
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+        driver.set_status_exception(RuntimeError("docker unavailable"))
+
+        with pytest.raises(SessionNotReadyError, match="Session is starting"):
+            await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.STARTING
+        assert session.container_id == "unreachable-container"
+        assert driver.create_calls == []
+        assert driver.destroy_calls == []
+
+    async def test_preserves_starting_session_when_dead_container_cleanup_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-starting-cleanup", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-starting-cleanup",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.STARTING,
+            container_id="dead-container",
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+        driver.set_status_override(
+            "dead-container",
+            ContainerInfo(
+                container_id="dead-container",
+                status=ContainerStatus.NOT_FOUND,
+            ),
+        )
+        monkeypatch.setattr(
+            driver,
+            "destroy",
+            AsyncMock(side_effect=RuntimeError("cleanup failed")),
+        )
+        monkeypatch.setattr(manager, "_wait_for_ready", AsyncMock(return_value=None))
+
+        with pytest.raises(SessionNotReadyError, match="cleanup"):
+            await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.STARTING
+        assert session.container_id == "dead-container"
+        assert session.endpoint is None
+        assert driver.create_calls == []
 
     async def test_readiness_failure_destroys_container_does_not_persist_endpoint_and_sets_metadata(
         self,
@@ -378,6 +626,53 @@ class TestSessionManagerHealthProbing:
         assert result.observed_state == SessionStatus.RUNNING
         assert result.container_id is not None
         assert result.container_id != "vanished-container-1"
+
+    async def test_dead_container_cleanup_failure_preserves_runtime_reference(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: AsyncSession,
+        fake_settings: Settings,
+        profile: ProfileConfig,
+        cargo: Cargo,
+    ):
+        with patch("app.managers.session.session.get_settings", return_value=fake_settings):
+            driver = FakeDriver()
+            manager = SessionManager(driver=driver, db_session=db_session)
+
+        sandbox = Sandbox(id="sandbox-probe-cleanup", owner="test-user", profile_id=profile.id)
+        session = Session(
+            id="sess-probe-cleanup",
+            sandbox_id=sandbox.id,
+            runtime_type="ship",
+            profile_id=profile.id,
+            desired_state=SessionStatus.RUNNING,
+            observed_state=SessionStatus.RUNNING,
+            container_id="dead-container",
+            endpoint="http://dead-runtime:8123",
+        )
+        db_session.add_all([sandbox, session])
+        await db_session.commit()
+        driver.set_status_override(
+            "dead-container",
+            ContainerInfo(
+                container_id="dead-container",
+                status=ContainerStatus.EXITED,
+            ),
+        )
+        monkeypatch.setattr(
+            driver,
+            "destroy",
+            AsyncMock(side_effect=RuntimeError("cleanup failed")),
+        )
+        monkeypatch.setattr(manager, "_wait_for_ready", AsyncMock(return_value=None))
+
+        with pytest.raises(SessionNotReadyError, match="cleanup"):
+            await manager.ensure_running(session=session, cargo=cargo, profile=profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.RUNNING
+        assert session.container_id == "dead-container"
+        assert session.endpoint == "http://dead-runtime:8123"
 
     async def test_ensure_running_degrades_gracefully_when_docker_unreachable(
         self,

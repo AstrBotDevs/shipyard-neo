@@ -27,6 +27,7 @@ from app.models.cargo import Cargo
 from app.models.session import Session, SessionStatus
 from app.services.http import http_client_manager
 from app.utils.datetime import utcnow
+from app.utils.runtime_health import all_expected_runtimes_running
 
 logger = structlog.get_logger()
 
@@ -148,27 +149,31 @@ class SessionManager:
 
         Backward compatible with existing single-container profiles.
         """
+        recovered_endpoint: str | None = None
+
         # Phase 1.5: Proactive health probing
         # If DB says RUNNING but container might be dead, probe before trusting
         if session.container_id is not None and session.observed_state == SessionStatus.RUNNING:
             session = await self._probe_and_recover_if_dead(session, cargo, profile)
 
+        # A process restart can leave the persisted state at STARTING after the
+        # runtime was created or even became healthy. Resume that transition
+        # instead of treating it as an in-process concurrent start.
+        if session.observed_state == SessionStatus.STARTING:
+            session, recovered_endpoint = await self._recover_starting_single(
+                session,
+                profile,
+            )
+
         # Already running and ready (after probe)
         if session.is_ready:
             return session
-
-        # Currently starting - tell client to retry
-        if session.observed_state == SessionStatus.STARTING:
-            raise SessionNotReadyError(
-                message="Session is starting",
-                sandbox_id=session.sandbox_id,
-                retry_after_ms=1000,
-            )
 
         # Need to create container
         if session.container_id is None:
             session.desired_state = SessionStatus.RUNNING
             session.observed_state = SessionStatus.STARTING
+            session.last_observed_at = utcnow()
             await self._db.commit()
 
             try:
@@ -198,10 +203,12 @@ class SessionManager:
             primary = profile.get_primary_container()
             runtime_port = primary.runtime_port if primary else 8123
             try:
-                endpoint = await self._driver.start(
-                    container_id,
-                    runtime_port=runtime_port,
-                )
+                endpoint = recovered_endpoint
+                if endpoint is None:
+                    endpoint = await self._driver.start(
+                        container_id,
+                        runtime_port=runtime_port,
+                    )
 
                 # Wait for runtime to be ready before marking as RUNNING.
                 # For browser containers (Gull), also checks that browser_ready=true
@@ -237,6 +244,15 @@ class SessionManager:
                             container_id=container_id,
                             error=str(destroy_error),
                         )
+                        session.endpoint = None
+                        session.observed_state = SessionStatus.FAILED
+                        session.last_observed_at = utcnow()
+                        await self._db.commit()
+                        raise SessionNotReadyError(
+                            message="Single-container cleanup is incomplete",
+                            sandbox_id=session.sandbox_id,
+                            retry_after_ms=1000,
+                        ) from destroy_error
                 session.container_id = None
                 session.endpoint = None
                 session.observed_state = SessionStatus.FAILED
@@ -270,13 +286,24 @@ class SessionManager:
                 primary_container_id=session.container_id,
                 container_names=[c.get("name") for c in session.containers],
             )
-            session = await self._probe_and_recover_multi_if_dead(session)
+            session, _runtime_group_healthy = await self._probe_and_recover_multi_if_dead(session)
 
         # Already running and ready
         if session.is_ready:
             return session
 
-        # Currently starting - tell client to retry
+        # A multi-container transition only persists its complete runtime map
+        # after every member is ready. If startup was interrupted, discard the
+        # incomplete runtime group before rebuilding it.
+        if session.observed_state == SessionStatus.STARTING:
+            session, runtime_group_healthy = await self._probe_and_recover_multi_if_dead(session)
+            if runtime_group_healthy and session.containers:
+                session = await self._finish_starting_multi(session, profile)
+
+        if session.is_ready:
+            return session
+
+        # Runtime discovery failures are handled conservatively.
         if session.observed_state == SessionStatus.STARTING:
             raise SessionNotReadyError(
                 message="Session is starting (multi-container)",
@@ -388,6 +415,168 @@ class SessionManager:
                 raise
 
         return session
+
+    async def _finish_starting_multi(
+        self,
+        session: Session,
+        profile: ProfileConfig,
+    ) -> Session:
+        """Finish a persisted multi-container transition whose runtimes survived."""
+        container_infos = [
+            MultiContainerInfo(
+                name=container["name"],
+                container_id=container["container_id"],
+                endpoint=container.get("endpoint"),
+                status=ContainerStatus.RUNNING,
+                runtime_type=container.get("runtime_type", "ship"),
+                capabilities=container.get("capabilities", []),
+            )
+            for container in session.containers or []
+        ]
+
+        await self._wait_for_multi_ready(
+            container_infos,
+            session_id=session.id,
+            sandbox_id=session.sandbox_id,
+        )
+
+        primary_spec = profile.get_primary_container()
+        primary_name = primary_spec.name if primary_spec else container_infos[0].name
+        primary_info = next(
+            (container for container in container_infos if container.name == primary_name),
+            container_infos[0],
+        )
+        if primary_info.endpoint is None:
+            raise SessionNotReadyError(
+                message="Primary container endpoint is unavailable",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            )
+
+        session.container_id = primary_info.container_id
+        session.endpoint = primary_info.endpoint
+        session.observed_state = SessionStatus.RUNNING
+        session.last_observed_at = utcnow()
+        await self._db.commit()
+
+        self._log.info(
+            "session.multi_starting_recovered",
+            session_id=session.id,
+            sandbox_id=session.sandbox_id,
+            primary_container_id=primary_info.container_id,
+            primary_endpoint=primary_info.endpoint,
+            container_ids=[container.container_id for container in container_infos],
+        )
+        return session
+
+    async def _recover_starting_single(
+        self,
+        session: Session,
+        profile: ProfileConfig,
+    ) -> tuple[Session, str | None]:
+        """Resume or reset a single-container STARTING transition."""
+        container_id = session.container_id
+        if container_id is None:
+            session.endpoint = None
+            session.observed_state = SessionStatus.PENDING
+            session.last_observed_at = utcnow()
+            await self._db.commit()
+            self._log.info(
+                "session.starting_recovered_before_create",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+            )
+            return session, None
+
+        primary = profile.get_primary_container()
+        runtime_port = primary.runtime_port if primary else 8123
+        try:
+            info = await self._driver.status(
+                container_id,
+                runtime_port=runtime_port,
+            )
+        except Exception as exc:
+            self._log.warning(
+                "session.starting_probe_failed",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                container_id=container_id,
+                error=str(exc),
+            )
+            raise SessionNotReadyError(
+                message="Session is starting",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            ) from exc
+
+        if info.status == ContainerStatus.RUNNING:
+            if info.endpoint is None:
+                self._log.warning(
+                    "session.starting_runtime_endpoint_missing",
+                    session_id=session.id,
+                    sandbox_id=session.sandbox_id,
+                    container_id=container_id,
+                )
+                raise SessionNotReadyError(
+                    message="Session is starting",
+                    sandbox_id=session.sandbox_id,
+                    retry_after_ms=1000,
+                )
+
+            self._log.info(
+                "session.starting_runtime_running",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                container_id=container_id,
+                endpoint=info.endpoint,
+            )
+            return session, info.endpoint
+
+        if info.status == ContainerStatus.CREATED:
+            self._log.info(
+                "session.starting_runtime_created",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                container_id=container_id,
+            )
+            return session, None
+
+        self._log.warning(
+            "session.starting_runtime_unhealthy",
+            session_id=session.id,
+            sandbox_id=session.sandbox_id,
+            container_id=container_id,
+            container_status=info.status.value,
+        )
+        try:
+            await self._driver.destroy(container_id)
+        except Exception as destroy_error:
+            self._log.warning(
+                "session.starting_runtime_destroy_failed",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                container_id=container_id,
+                error=str(destroy_error),
+            )
+            raise SessionNotReadyError(
+                message="Single-container cleanup is incomplete",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            ) from destroy_error
+
+        session.container_id = None
+        session.endpoint = None
+        session.observed_state = SessionStatus.PENDING
+        session.last_observed_at = utcnow()
+        await self._db.commit()
+
+        self._log.info(
+            "session.starting_recovered_from_dead_runtime",
+            session_id=session.id,
+            sandbox_id=session.sandbox_id,
+            old_container_id=container_id,
+        )
+        return session, None
 
     async def _wait_for_multi_ready(
         self,
@@ -749,7 +938,10 @@ class SessionManager:
             session.last_active_at = utcnow()
             await self._db.commit()
 
-    async def _probe_and_recover_multi_if_dead(self, session: Session) -> Session:
+    async def _probe_and_recover_multi_if_dead(
+        self,
+        session: Session,
+    ) -> tuple[Session, bool]:
         """Probe multi-container runtime presence and reset stale session state.
 
         For multi-container sessions, the DB may still say RUNNING even after the
@@ -775,7 +967,7 @@ class SessionManager:
                 expected_container_ids=expected_container_ids,
                 error=str(e),
             )
-            return session
+            return session, False
 
         live_instances = [
             instance for instance in instances if instance.state == ContainerStatus.RUNNING.value
@@ -792,24 +984,86 @@ class SessionManager:
             live_runtime_count=len(live_instances),
         )
 
-        has_live_runtime = len(live_instances) > 0
-        if has_live_runtime:
+        runtime_group_healthy = all_expected_runtimes_running(
+            session.containers or [],
+            instances,
+        )
+        if runtime_group_healthy:
             self._log.debug(
                 "session.multi_probe.healthy",
                 session_id=session.id,
                 sandbox_id=session.sandbox_id,
                 live_runtime_ids=[instance.id for instance in live_instances],
             )
-            return session
+            return session, True
 
+        expected_container_ids_set = {
+            container_id
+            for container_id in expected_container_ids
+            if isinstance(container_id, str) and container_id
+        }
+        live_runtime_ids = {instance.id for instance in live_instances}
         self._log.warning(
-            "session.multi_runtime_dead_detected",
+            "session.multi_runtime_unhealthy_detected",
             session_id=session.id,
             sandbox_id=session.sandbox_id,
             expected_container_names=expected_container_names,
             expected_container_ids=expected_container_ids,
+            missing_runtime_ids=sorted(expected_container_ids_set - live_runtime_ids),
             runtime_count=len(instances),
         )
+
+        cleanup_failures: list[dict[str, str]] = []
+        for instance in instances:
+            try:
+                await self._driver.destroy_runtime_instance(instance.id)
+            except Exception as cleanup_error:
+                cleanup_failures.append(
+                    {
+                        "operation": "destroy_runtime",
+                        "resource_id": instance.id,
+                        "error": str(cleanup_error),
+                    }
+                )
+                self._log.warning(
+                    "session.multi_recovery.destroy_runtime_failed",
+                    session_id=session.id,
+                    sandbox_id=session.sandbox_id,
+                    runtime_id=instance.id,
+                    runtime_name=instance.name,
+                    runtime_state=instance.state,
+                    error=str(cleanup_error),
+                )
+
+        try:
+            await self._driver.remove_session_network(session.id)
+        except Exception as cleanup_error:
+            cleanup_failures.append(
+                {
+                    "operation": "remove_network",
+                    "resource_id": session.id,
+                    "error": str(cleanup_error),
+                }
+            )
+            self._log.warning(
+                "session.multi_recovery.remove_network_failed",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                error=str(cleanup_error),
+            )
+
+        if cleanup_failures:
+            self._log.warning(
+                "session.multi_recovery.cleanup_incomplete",
+                session_id=session.id,
+                sandbox_id=session.sandbox_id,
+                failures=cleanup_failures,
+            )
+            raise SessionNotReadyError(
+                message="Multi-container cleanup is incomplete",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            )
 
         old_primary_container_id = session.container_id
         old_endpoint = session.endpoint
@@ -828,7 +1082,7 @@ class SessionManager:
             old_endpoint=old_endpoint,
             reset_observed_state=session.observed_state,
         )
-        return session
+        return session, False
 
     async def _probe_and_recover_if_dead(
         self,
@@ -889,12 +1143,17 @@ class SessionManager:
         try:
             await self._driver.destroy(container_id)
         except Exception as destroy_error:
-            self._log.debug(
+            self._log.warning(
                 "session.destroy_dead_container_failed",
                 session_id=session.id,
                 container_id=container_id,
                 error=str(destroy_error),
             )
+            raise SessionNotReadyError(
+                message="Single-container cleanup is incomplete",
+                sandbox_id=session.sandbox_id,
+                retry_after_ms=1000,
+            ) from destroy_error
 
         # Clear runtime fields and reset to PENDING for rebuild
         session.container_id = None

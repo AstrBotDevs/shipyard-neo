@@ -617,7 +617,7 @@ class K8sDriver(Driver):
             )
         except ApiException:
             self._log.exception("k8s.list_runtime_instances.failed")
-            return []
+            raise
 
         instances = []
         for pod in pod_list.items:
@@ -670,8 +670,30 @@ class K8sDriver(Driver):
                     "k8s.destroy_runtime_instance.not_found",
                     pod_name=instance_id,
                 )
+                return
             else:
                 raise
+
+        for _ in range(self._pod_startup_timeout):
+            try:
+                await v1.read_namespaced_pod(
+                    name=instance_id,
+                    namespace=self._namespace,
+                )
+            except ApiException as e:
+                if e.status == 404:
+                    self._log.info(
+                        "k8s.destroy_runtime_instance.deleted",
+                        pod_name=instance_id,
+                    )
+                    return
+                raise
+
+            await asyncio.sleep(1)
+
+        raise RuntimeError(
+            f"Pod {instance_id} was not deleted within {self._pod_startup_timeout} seconds"
+        )
 
     # ================================================================
     # Phase 2: Multi-container orchestration (Sidecar pattern)

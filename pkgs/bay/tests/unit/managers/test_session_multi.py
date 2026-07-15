@@ -2,8 +2,8 @@
 
 Tests the _ensure_running_multi path for multi-container profiles.
 
-Note: We patch [`SessionManager._wait_for_multi_ready()`](pkgs/bay/app/managers/session/session.py:365)
-in unit tests because FakeDriver does not run a real HTTP server.
+Note: Unit tests patch `SessionManager._wait_for_multi_ready()` because
+FakeDriver does not run a real HTTP server.
 """
 
 from __future__ import annotations
@@ -14,10 +14,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import ContainerSpec, ProfileConfig
+from app.errors import SessionNotReadyError
 from app.managers.session.session import SessionManager
 from app.models.cargo import Cargo
 from app.models.session import Session, SessionStatus
-from tests.fakes import FakeDriver
+from tests.fakes import FakeContainerState, FakeDriver
 
 
 def _multi_profile() -> ProfileConfig:
@@ -79,8 +80,8 @@ def cargo() -> Cargo:
 def _patch_wait_for_ready_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Avoid real HTTP calls in readiness checks.
 
-    - Multi-container uses [`SessionManager._wait_for_multi_ready()`](pkgs/bay/app/managers/session/session.py:365)
-    - Single-container uses [`SessionManager._wait_for_ready()`](pkgs/bay/app/managers/session/session.py:444)
+    - Multi-container uses `SessionManager._wait_for_multi_ready()`.
+    - Single-container uses `SessionManager._wait_for_ready()`.
 
     FakeDriver does not run a real HTTP server, so we patch both to no-op.
     """
@@ -168,6 +169,103 @@ class TestMultiContainerEnsureRunning:
         assert session.container_id == ship_container["container_id"]
 
     @pytest.mark.asyncio
+    async def test_recovers_incomplete_starting_runtime_group(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi", cargo, profile)
+        session.observed_state = SessionStatus.STARTING
+        session.desired_state = SessionStatus.RUNNING
+        await db_session.commit()
+
+        await driver.create_session_network(session.id)
+        driver._containers["stale-ship"] = FakeContainerState(
+            container_id="stale-ship",
+            session_id=session.id,
+            profile_id=profile.id,
+            cargo_id=cargo.id,
+        )
+        driver._containers["stale-gull"] = FakeContainerState(
+            container_id="stale-gull",
+            session_id=session.id,
+            profile_id=profile.id,
+            cargo_id=cargo.id,
+        )
+
+        recovered = await mgr.ensure_running(session, cargo, profile)
+
+        assert recovered.observed_state == SessionStatus.RUNNING
+        assert recovered.containers is not None
+        assert len(recovered.containers) == 2
+        assert "stale-ship" not in driver._containers
+        assert "stale-gull" not in driver._containers
+        assert driver.remove_network_calls == [session.id]
+        assert driver.create_network_calls == [session.id, session.id]
+        assert len(driver.create_multi_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_keeps_multi_starting_state_when_runtime_discovery_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        driver: FakeDriver,
+        db_session: AsyncSession,
+        cargo: Cargo,
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi-probe-error", cargo, profile)
+        session.observed_state = SessionStatus.STARTING
+        session.desired_state = SessionStatus.RUNNING
+        await db_session.commit()
+
+        async def _raise_runtime_discovery_error(*, labels):
+            raise RuntimeError("runtime backend unavailable")
+
+        monkeypatch.setattr(driver, "list_runtime_instances", _raise_runtime_discovery_error)
+
+        with pytest.raises(SessionNotReadyError, match="Session is starting"):
+            await mgr.ensure_running(session, cargo, profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.STARTING
+        assert session.container_id is None
+        assert not hasattr(driver, "create_multi_calls")
+
+    @pytest.mark.asyncio
+    async def test_finishes_starting_session_when_complete_runtime_group_is_running(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+        session = await mgr.create("sandbox-starting-multi-running", cargo, profile)
+        session = await mgr.ensure_running(session, cargo, profile)
+
+        original_container_id = session.container_id
+        original_endpoint = session.endpoint
+        original_containers = [dict(container) for container in session.containers or []]
+        session.observed_state = SessionStatus.STARTING
+        await db_session.commit()
+
+        recovered = await mgr.ensure_running(session, cargo, profile)
+
+        assert recovered.observed_state == SessionStatus.RUNNING
+        assert recovered.container_id == original_container_id
+        assert recovered.endpoint == original_endpoint
+        assert recovered.containers == original_containers
+        assert len(driver.create_multi_calls) == 1
+        assert len(driver.start_multi_calls) == 1
+
+    @pytest.mark.asyncio
     async def test_multi_container_idempotent(
         self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
     ):
@@ -223,7 +321,7 @@ class TestMultiContainerEnsureRunning:
     async def test_multi_container_recovers_when_runtime_group_was_deleted(
         self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
     ):
-        """If the whole multi-container runtime group disappears, ensure_running should recreate it."""
+        """Recreate the multi-container runtime group when every runtime disappears."""
         from app.managers.session import SessionManager
 
         mgr = SessionManager(driver, db_session)
@@ -268,6 +366,125 @@ class TestMultiContainerEnsureRunning:
         # One initial create + one recovery create.
         assert len(driver.create_multi_calls) == 2
         assert len(driver.start_multi_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_multi_container_recovers_when_one_runtime_was_deleted(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        """A partial runtime group must be cleaned up and recreated."""
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+
+        session = await mgr.create("sandbox-partial", cargo, profile)
+        session = await mgr.ensure_running(session, cargo, profile)
+
+        assert session.containers is not None
+        original_container_ids = [container["container_id"] for container in session.containers]
+        gull_container_id = next(
+            container["container_id"]
+            for container in session.containers
+            if container["name"] == "gull"
+        )
+        await driver.destroy(gull_container_id)
+
+        refreshed = await mgr.get(session.id)
+        assert refreshed is not None
+
+        recovered = await mgr.ensure_running(refreshed, cargo, profile)
+
+        assert recovered.observed_state == SessionStatus.RUNNING
+        assert recovered.containers is not None
+        recovered_container_ids = [container["container_id"] for container in recovered.containers]
+        assert recovered_container_ids != original_container_ids
+        assert all(
+            container_id not in driver._containers for container_id in original_container_ids
+        )
+        assert session.id in driver.remove_network_calls
+        assert len(driver.create_multi_calls) == 2
+        assert len(driver.start_multi_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_partial_runtime_cleanup_failure_preserves_session_metadata(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        """A failed runtime cleanup must remain retryable with its metadata intact."""
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+
+        session = await mgr.create("sandbox-cleanup-failure", cargo, profile)
+        session = await mgr.ensure_running(session, cargo, profile)
+        assert session.containers is not None
+        original_container_id = session.container_id
+        original_endpoint = session.endpoint
+        original_containers = [dict(container) for container in session.containers]
+
+        gull_container_id = next(
+            container["container_id"]
+            for container in session.containers
+            if container["name"] == "gull"
+        )
+        await driver.destroy(gull_container_id)
+
+        with patch.object(
+            driver,
+            "destroy_runtime_instance",
+            AsyncMock(side_effect=RuntimeError("runtime cleanup failed")),
+        ):
+            with pytest.raises(SessionNotReadyError, match="cleanup"):
+                await mgr.ensure_running(session, cargo, profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.RUNNING
+        assert session.container_id == original_container_id
+        assert session.endpoint == original_endpoint
+        assert session.containers == original_containers
+        assert len(driver.create_multi_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_partial_runtime_network_cleanup_failure_preserves_session_metadata(
+        self, driver: FakeDriver, db_session: AsyncSession, cargo: Cargo
+    ):
+        """A failed network cleanup must retain state for the next repair attempt."""
+        mgr = SessionManager(driver, db_session)
+        profile = _multi_profile()
+
+        db_session.add(cargo)
+        await db_session.commit()
+
+        session = await mgr.create("sandbox-network-cleanup-failure", cargo, profile)
+        session = await mgr.ensure_running(session, cargo, profile)
+        assert session.containers is not None
+        original_container_id = session.container_id
+        original_endpoint = session.endpoint
+        original_containers = [dict(container) for container in session.containers]
+
+        gull_container_id = next(
+            container["container_id"]
+            for container in session.containers
+            if container["name"] == "gull"
+        )
+        await driver.destroy(gull_container_id)
+
+        with patch.object(
+            driver,
+            "remove_session_network",
+            AsyncMock(side_effect=RuntimeError("network cleanup failed")),
+        ):
+            with pytest.raises(SessionNotReadyError, match="cleanup"):
+                await mgr.ensure_running(session, cargo, profile)
+
+        await db_session.refresh(session)
+        assert session.observed_state == SessionStatus.RUNNING
+        assert session.container_id == original_container_id
+        assert session.endpoint == original_endpoint
+        assert session.containers == original_containers
+        assert len(driver.create_multi_calls) == 1
 
     @pytest.mark.asyncio
     async def test_single_container_path_unchanged(

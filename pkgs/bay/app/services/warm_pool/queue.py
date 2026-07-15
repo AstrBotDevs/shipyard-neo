@@ -320,24 +320,28 @@ class WarmupQueue:
                     warm_state=sandbox.warm_state,
                 )
 
-                # If this is a warm pool sandbox, mark it as available after warmup
-                if sandbox.is_warm_pool and sandbox.warm_state is None:
+                # The scheduler may reset warm_state in another DB session while
+                # ensure_running() is recovering the runtime. Let the manager
+                # perform a conditional database transition instead of trusting
+                # this session's potentially stale ORM object.
+                if sandbox.is_warm_pool:
                     from app.config import get_settings
 
                     settings = get_settings()
                     profile = settings.get_profile(sandbox.profile_id)
                     warm_rotate_ttl = profile.warm_rotate_ttl if profile else 1800
-                    await manager.mark_warm_available(
+                    marked_available = await manager.mark_warm_available(
                         sandbox.id,
                         warm_rotate_ttl=warm_rotate_ttl,
                     )
-                    self._log.info(
-                        "warmup_worker.mark_available.complete",
-                        worker_id=worker_id,
-                        sandbox_id=sandbox.id,
-                        profile_id=sandbox.profile_id,
-                        warm_rotate_ttl=warm_rotate_ttl,
-                    )
+                    if marked_available:
+                        self._log.info(
+                            "warmup_worker.mark_available.complete",
+                            worker_id=worker_id,
+                            sandbox_id=sandbox.id,
+                            profile_id=sandbox.profile_id,
+                            warm_rotate_ttl=warm_rotate_ttl,
+                        )
 
             self._stats.success_total += 1
             self._log.info(
