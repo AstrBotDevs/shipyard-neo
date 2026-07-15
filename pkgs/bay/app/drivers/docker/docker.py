@@ -512,9 +512,28 @@ class DockerDriver(Driver):
 
     # Volume management
 
-    def _local_cargo_path(self, volume_ref: str) -> Path:
-        """Map a host bind path or volume name to Bay's mounted cargo root."""
-        return self._cargo_root_path / Path(volume_ref).name
+    def _local_cargo_path(self, volume_ref: str, host_root: str) -> Path:
+        """Map a validated host bind path or cargo name to Bay's mount."""
+        ref_path = Path(volume_ref)
+        if ref_path.is_absolute():
+            try:
+                relative_ref = ref_path.relative_to(Path(host_root))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cargo bind path is outside the configured host root: {volume_ref}"
+                ) from exc
+        else:
+            relative_ref = ref_path
+
+        if len(relative_ref.parts) != 1 or not relative_ref.name.startswith(
+            "bay-cargo-"
+        ):
+            raise ValueError(f"Invalid cargo bind reference: {volume_ref}")
+
+        local_path = self._cargo_root_path / relative_ref.name
+        if local_path.is_symlink():
+            raise ValueError(f"Cargo bind path must not be a symbolic link: {volume_ref}")
+        return local_path
 
     async def create_volume(self, name: str, labels: dict[str, str] | None = None) -> str:
         """Create a cargo volume.
@@ -533,7 +552,7 @@ class DockerDriver(Driver):
         if host_root:
             # Create through Bay's mounted path, then return the equivalent
             # Docker-host path for use in the daemon's Binds configuration.
-            local_path = self._local_cargo_path(name)
+            local_path = self._local_cargo_path(name, host_root)
             local_path.mkdir(parents=True, exist_ok=True)
             host_path = Path(host_root) / Path(name).name
             self._log.info(
@@ -555,7 +574,7 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            local_path = self._local_cargo_path(name)
+            local_path = self._local_cargo_path(name, host_root)
             if local_path.exists():
                 shutil.rmtree(local_path, ignore_errors=True)
             self._log.info(
@@ -578,7 +597,7 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            return self._local_cargo_path(name).is_dir()
+            return self._local_cargo_path(name, host_root).is_dir()
 
         # Named-volume mode
         try:

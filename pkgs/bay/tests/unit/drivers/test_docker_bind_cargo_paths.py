@@ -52,6 +52,27 @@ class TestDockerBindCargoPaths(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(local_path.exists())
 
+    async def test_delete_volume_rejects_cargo_root(self) -> None:
+        sentinel = self.local_root / "keep.txt"
+        self.local_root.mkdir(parents=True)
+        sentinel.write_text("keep")
+
+        with self.assertRaises(ValueError):
+            await self.driver.delete_volume("/")
+
+        self.assertTrue(sentinel.is_file())
+
+    async def test_delete_volume_rejects_path_outside_configured_host_root(
+        self,
+    ) -> None:
+        local_path = self.local_root / "bay-cargo-test"
+        local_path.mkdir(parents=True)
+
+        with self.assertRaises(ValueError):
+            await self.driver.delete_volume("/other-root/bay-cargo-test")
+
+        self.assertTrue(local_path.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
