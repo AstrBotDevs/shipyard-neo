@@ -88,6 +88,8 @@ class DockerDriver(Driver):
 
         self._log = logger.bind(driver="docker")
         self._client: aiodocker.Docker | None = None
+        self._cargo_root_path = Path(settings.cargo.root_path)
+        self._configured_host_root = settings.cargo.host_root_path
         # Cached host-side cargo root path, resolved once on first use.
         self._resolved_host_root: str | None | _UNSET = _UNSET
 
@@ -109,15 +111,13 @@ class DockerDriver(Driver):
         if self._resolved_host_root is not _UNSET:
             return self._resolved_host_root  # type: ignore[return-value]
 
-        settings = get_settings()
-
         # 1. Explicit config always wins.
-        if settings.cargo.host_root_path:
-            self._resolved_host_root = settings.cargo.host_root_path
+        if self._configured_host_root:
+            self._resolved_host_root = self._configured_host_root
             return self._resolved_host_root
 
         # 2. Auto-detect via /proc/self/mountinfo.
-        root_path = settings.cargo.root_path.rstrip("/")
+        root_path = str(self._cargo_root_path).rstrip("/") or "/"
         try:
             with open("/proc/self/mountinfo") as f:
                 for line in f:
@@ -512,6 +512,10 @@ class DockerDriver(Driver):
 
     # Volume management
 
+    def _local_cargo_path(self, volume_ref: str) -> Path:
+        """Map a host bind path or volume name to Bay's mounted cargo root."""
+        return self._cargo_root_path / Path(volume_ref).name
+
     async def create_volume(self, name: str, labels: dict[str, str] | None = None) -> str:
         """Create a cargo volume.
 
@@ -527,11 +531,18 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            # Bind-mount mode: directory on the Docker host
-            cargo_path = Path(host_root) / name
-            cargo_path.mkdir(parents=True, exist_ok=True)
-            self._log.info("docker.create_volume.bind", name=name, path=str(cargo_path))
-            return str(cargo_path)
+            # Create through Bay's mounted path, then return the equivalent
+            # Docker-host path for use in the daemon's Binds configuration.
+            local_path = self._local_cargo_path(name)
+            local_path.mkdir(parents=True, exist_ok=True)
+            host_path = Path(host_root) / Path(name).name
+            self._log.info(
+                "docker.create_volume.bind",
+                name=name,
+                local_path=str(local_path),
+                path=str(host_path),
+            )
+            return str(host_path)
 
         # Named-volume mode: Docker manages the volume lifecycle
         client = await self._get_client()
@@ -544,11 +555,14 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            # Bind-mount mode: name is already a host path, delete directory
-            cargo_path = Path(name)
-            if cargo_path.exists():
-                shutil.rmtree(cargo_path, ignore_errors=True)
-            self._log.info("docker.delete_volume.bind", path=str(cargo_path))
+            local_path = self._local_cargo_path(name)
+            if local_path.exists():
+                shutil.rmtree(local_path, ignore_errors=True)
+            self._log.info(
+                "docker.delete_volume.bind",
+                local_path=str(local_path),
+                path=name,
+            )
         else:
             # Named-volume mode: name is volume name
             try:
@@ -564,8 +578,7 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            # Bind-mount mode: name is already the host path
-            return Path(name).is_dir()
+            return self._local_cargo_path(name).is_dir()
 
         # Named-volume mode
         try:
