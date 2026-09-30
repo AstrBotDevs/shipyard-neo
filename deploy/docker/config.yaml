@@ -42,6 +42,9 @@ driver:
 
 cargo:
   root_path: "/var/lib/bay/cargos"
+  # Docker inspect normally resolves this bind mount's host path automatically.
+  # Set it explicitly if Bay cannot inspect its own container via docker.sock.
+  # host_root_path: "/absolute/path/to/bay-cargos"
   default_size_limit_mb: 1024
   mount_path: "/workspace"
 

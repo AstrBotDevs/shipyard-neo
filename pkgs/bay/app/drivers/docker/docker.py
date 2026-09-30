@@ -20,6 +20,8 @@ Note: runtime_port is provided by ProfileConfig (do not hardcode Ship port here)
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -96,9 +98,7 @@ class DockerDriver(Driver):
 
         Priority:
         1. Explicit ``cargo.host_root_path`` in config.
-        2. Auto-detection: parse ``/proc/self/mountinfo`` to find the
-           host-side source of the cargo root bind mount.  This works
-           regardless of cgroup version or container runtime.
+        2. Inspect Bay's own Docker container for the cargo bind mount.
 
         Result is cached after first resolution — the host path doesn't
         change during Bay's lifetime.
@@ -116,27 +116,63 @@ class DockerDriver(Driver):
             self._resolved_host_root = settings.cargo.host_root_path
             return self._resolved_host_root
 
-        # 2. Auto-detect via /proc/self/mountinfo.
-        root_path = settings.cargo.root_path.rstrip("/")
+        root_path = settings.cargo.root_path.rstrip("/") or "/"
         try:
-            with open("/proc/self/mountinfo") as f:
-                for line in f:
-                    # Format: id parent major:minor root mount_point opts - type dev opts
-                    parts = line.split()
-                    if len(parts) >= 5 and parts[4].rstrip("/") == root_path:
-                        host_source = parts[3]  # "root" field = host-side path
-                        self._log.info(
-                            "docker.host_root.resolved",
-                            mount_dest=root_path,
-                            mount_source=host_source,
-                        )
-                        self._resolved_host_root = host_source
-                        return host_source
-        except Exception:
-            self._log.debug("docker.host_root.mountinfo_failed")
+            with open("/proc/self/mountinfo") as mounts:
+                is_mounted = any(
+                    len(parts) >= 5 and (parts[4].rstrip("/") or "/") == root_path
+                    for parts in (line.split() for line in mounts)
+                )
+        except OSError as exc:
+            raise RuntimeError("Cannot check Bay's cargo mount in /proc/self/mountinfo") from exc
 
-        self._resolved_host_root = None
-        return None
+        if not is_mounted:
+            self._resolved_host_root = None
+            return None
+
+        hostname = os.environ.get("HOSTNAME")
+        if not hostname:
+            raise RuntimeError(
+                "Cannot inspect Bay's cargo mount without HOSTNAME; "
+                "set cargo.host_root_path explicitly"
+            )
+
+        try:
+            client = await self._get_client()
+            container = await client.containers.get(hostname)
+            info = await container.show()
+        except Exception as exc:
+            raise RuntimeError(
+                "Cannot inspect Bay's cargo mount via Docker; "
+                "check docker.sock or set cargo.host_root_path explicitly"
+            ) from exc
+
+        for mount in info.get("Mounts") or []:
+            if not isinstance(mount, dict) or not isinstance(mount.get("Destination"), str):
+                continue
+            if (mount["Destination"].rstrip("/") or "/") != root_path:
+                continue
+            if mount.get("Type") != "bind":
+                self._resolved_host_root = None
+                return None
+            host_source = mount.get("Source")
+            if not isinstance(host_source, str) or not Path(host_source).is_absolute():
+                raise RuntimeError(
+                    "Docker reported an invalid cargo bind source; "
+                    "set cargo.host_root_path explicitly"
+                )
+            self._log.info(
+                "docker.host_root.resolved",
+                mount_dest=root_path,
+                mount_source=host_source,
+            )
+            self._resolved_host_root = host_source
+            return host_source
+
+        raise RuntimeError(
+            "Docker did not report Bay's mounted cargo path; "
+            "set cargo.host_root_path explicitly"
+        )
 
     async def _get_client(self) -> aiodocker.Docker:
         """Get or create the aiodocker client."""
@@ -553,9 +589,13 @@ class DockerDriver(Driver):
         host_root = await self._resolve_host_root()
 
         if host_root:
-            # Bind-mount mode: directory on the Docker host
+            if not re.fullmatch(r"bay-cargo-ws-[0-9a-f]{12}", name):
+                raise ValueError(f"Invalid cargo bind name: {name}")
+            local_path = Path(get_settings().cargo.root_path) / name
+            if local_path.is_symlink():
+                raise ValueError(f"Cargo bind path must not be a symbolic link: {name}")
+            local_path.mkdir(parents=True, exist_ok=True)
             cargo_path = Path(host_root) / name
-            cargo_path.mkdir(parents=True, exist_ok=True)
             self._log.info("docker.create_volume.bind", name=name, path=str(cargo_path))
             return str(cargo_path)
 
@@ -565,17 +605,27 @@ class DockerDriver(Driver):
         self._log.info("docker.create_volume.named", name=name)
         return name
 
+    @staticmethod
+    def _bind_cargo_ref(name: str) -> Path | None:
+        path = Path(name)
+        if not path.is_absolute():
+            return None
+        if not re.fullmatch(r"bay-cargo-ws-[0-9a-f]{12}", path.name):
+            raise ValueError(f"Invalid cargo bind reference: {name}")
+        return path
+
     async def delete_volume(self, name: str) -> None:
         """Delete a cargo volume (directory or named volume)."""
-        host_root = await self._resolve_host_root()
-
-        if host_root:
-            # Bind-mount mode: name is already a host path, delete directory
-            cargo_path = Path(name)
-            try:
-                shutil.rmtree(cargo_path)
-            except FileNotFoundError:
-                pass
+        cargo_path = self._bind_cargo_ref(name)
+        if cargo_path is not None:
+            host_root = await self._resolve_host_root()
+            if host_root is None or cargo_path.parent != Path(host_root):
+                raise ValueError(f"Cargo bind path is outside the configured host root: {name}")
+            local_path = Path(get_settings().cargo.root_path) / cargo_path.name
+            if local_path.is_symlink():
+                raise ValueError(f"Cargo bind path must not be a symbolic link: {name}")
+            if local_path.exists():
+                shutil.rmtree(local_path, ignore_errors=True)
             self._log.info("docker.delete_volume.bind", path=str(cargo_path))
         else:
             # Named-volume mode: name is volume name
@@ -593,11 +643,12 @@ class DockerDriver(Driver):
 
     async def volume_exists(self, name: str) -> bool:
         """Check if cargo volume exists."""
-        host_root = await self._resolve_host_root()
-
-        if host_root:
-            # Bind-mount mode: name is already the host path
-            return Path(name).is_dir()
+        cargo_path = self._bind_cargo_ref(name)
+        if cargo_path is not None:
+            host_root = await self._resolve_host_root()
+            if host_root is None or cargo_path.parent != Path(host_root):
+                raise ValueError(f"Cargo bind path is outside the configured host root: {name}")
+            return (Path(get_settings().cargo.root_path) / cargo_path.name).is_dir()
 
         # Named-volume mode
         try:
