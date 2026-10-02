@@ -44,6 +44,7 @@ services:
       - ./bay-cargos:/bay/cargos
     environment:
       - BAY_CONFIG_FILE=/app/config.yaml
+      - BAY_CONTAINER_NAME=shipyard-dev-bay
     networks:
       - shipyard-dev
     healthcheck:

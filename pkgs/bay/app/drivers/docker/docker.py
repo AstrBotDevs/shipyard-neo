@@ -130,16 +130,16 @@ class DockerDriver(Driver):
             self._resolved_host_root = None
             return None
 
-        hostname = os.environ.get("HOSTNAME")
-        if not hostname:
+        container_name = os.environ.get("BAY_CONTAINER_NAME") or os.environ.get("HOSTNAME")
+        if not container_name:
             raise RuntimeError(
-                "Cannot inspect Bay's cargo mount without HOSTNAME; "
+                "Cannot inspect Bay's cargo mount without BAY_CONTAINER_NAME or HOSTNAME; "
                 "set cargo.host_root_path explicitly"
             )
 
         try:
             client = await self._get_client()
-            container = await client.containers.get(hostname)
+            container = await client.containers.get(container_name)
             info = await container.show()
         except Exception as exc:
             raise RuntimeError(
@@ -591,7 +591,10 @@ class DockerDriver(Driver):
         if host_root:
             if not re.fullmatch(r"bay-cargo-ws-[0-9a-f]{12}", name):
                 raise ValueError(f"Invalid cargo bind name: {name}")
-            local_path = Path(get_settings().cargo.root_path) / name
+            local_root = Path(get_settings().cargo.root_path)
+            if local_root.is_symlink() or not local_root.is_dir():
+                raise ValueError(f"Cargo mount is not a directory: {local_root}")
+            local_path = local_root / name
             if local_path.is_symlink():
                 raise ValueError(f"Cargo bind path must not be a symbolic link: {name}")
             local_path.mkdir(parents=True, exist_ok=True)
@@ -621,11 +624,16 @@ class DockerDriver(Driver):
             host_root = await self._resolve_host_root()
             if host_root is None or cargo_path.parent != Path(host_root):
                 raise ValueError(f"Cargo bind path is outside the configured host root: {name}")
-            local_path = Path(get_settings().cargo.root_path) / cargo_path.name
+            local_root = Path(get_settings().cargo.root_path)
+            if local_root.is_symlink() or not local_root.is_dir():
+                raise ValueError(f"Cargo mount is not a directory: {local_root}")
+            local_path = local_root / cargo_path.name
             if local_path.is_symlink():
                 raise ValueError(f"Cargo bind path must not be a symbolic link: {name}")
             if local_path.exists():
-                shutil.rmtree(local_path, ignore_errors=True)
+                if not local_path.is_dir():
+                    raise ValueError(f"Cargo bind path is not a directory: {name}")
+                shutil.rmtree(local_path)
             self._log.info("docker.delete_volume.bind", path=str(cargo_path))
         else:
             # Named-volume mode: name is volume name
@@ -648,7 +656,13 @@ class DockerDriver(Driver):
             host_root = await self._resolve_host_root()
             if host_root is None or cargo_path.parent != Path(host_root):
                 raise ValueError(f"Cargo bind path is outside the configured host root: {name}")
-            return (Path(get_settings().cargo.root_path) / cargo_path.name).is_dir()
+            local_root = Path(get_settings().cargo.root_path)
+            if local_root.is_symlink() or not local_root.is_dir():
+                raise ValueError(f"Cargo mount is not a directory: {local_root}")
+            local_path = local_root / cargo_path.name
+            if local_path.is_symlink():
+                raise ValueError(f"Cargo bind path must not be a symbolic link: {name}")
+            return local_path.is_dir()
 
         # Named-volume mode
         try:

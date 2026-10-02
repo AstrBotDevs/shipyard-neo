@@ -13,6 +13,7 @@ from app.drivers.docker.docker import DockerDriver
 @pytest.fixture
 def driver(monkeypatch):
     monkeypatch.setenv("HOSTNAME", "bay-container-id")
+    monkeypatch.delenv("BAY_CONTAINER_NAME", raising=False)
     monkeypatch.setattr(
         docker_module,
         "get_settings",
@@ -58,6 +59,44 @@ async def test_resolves_bind_source_from_docker_inspect(driver, source):
     assert await driver._resolve_host_root() == source
     client.containers.get.assert_awaited_once_with("bay-container-id")
     container.show.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_configured_container_name_works_with_custom_hostname(driver, monkeypatch):
+    monkeypatch.setenv("HOSTNAME", "custom-internal-hostname")
+    monkeypatch.setenv("BAY_CONTAINER_NAME", "bay")
+    client, _ = inspect_mounts(
+        driver,
+        [
+            {
+                "Type": "bind",
+                "Destination": "/var/lib/bay/cargos",
+                "Source": "/home/Docker/AstrBot/data/cargos",
+            }
+        ],
+    )
+
+    assert await driver._resolve_host_root() == "/home/Docker/AstrBot/data/cargos"
+    client.containers.get.assert_awaited_once_with("bay")
+
+
+@pytest.mark.asyncio
+async def test_configured_container_name_works_without_hostname(driver, monkeypatch):
+    monkeypatch.delenv("HOSTNAME")
+    monkeypatch.setenv("BAY_CONTAINER_NAME", "bay")
+    client, _ = inspect_mounts(
+        driver,
+        [
+            {
+                "Type": "bind",
+                "Destination": "/var/lib/bay/cargos",
+                "Source": "/home/Docker/AstrBot/data/cargos",
+            }
+        ],
+    )
+
+    assert await driver._resolve_host_root() == "/home/Docker/AstrBot/data/cargos"
+    client.containers.get.assert_awaited_once_with("bay")
 
 
 @pytest.mark.asyncio
@@ -134,7 +173,7 @@ async def test_missing_hostname_reports_configuration_error(driver, monkeypatch)
     monkeypatch.delenv("HOSTNAME")
     driver._get_client = AsyncMock()
 
-    with pytest.raises(RuntimeError, match="HOSTNAME"):
+    with pytest.raises(RuntimeError, match="BAY_CONTAINER_NAME or HOSTNAME"):
         await driver._resolve_host_root()
     driver._get_client.assert_not_awaited()
 
@@ -150,6 +189,7 @@ async def test_mount_missing_from_docker_inspect_fails_closed(driver):
 @pytest.mark.asyncio
 async def test_create_bind_cargo_on_local_mount(driver, tmp_path, monkeypatch):
     local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
     host_root = "/daemon-only/cargos"
     monkeypatch.setattr(
         docker_module,
@@ -216,3 +256,71 @@ async def test_rejects_unrelated_absolute_path(driver, tmp_path):
         await driver.delete_volume(str(unrelated))
 
     assert unrelated.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_rejects_symlinked_cargo_mount(driver, tmp_path, monkeypatch):
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    symlink_root = tmp_path / "bay-mount"
+    symlink_root.symlink_to(real_root, target_is_directory=True)
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(symlink_root), host_root_path="/daemon-only/cargos")
+        ),
+    )
+    cargo_name = "bay-cargo-ws-123456789abc"
+
+    with pytest.raises(ValueError, match="Cargo mount is not a directory"):
+        await driver.create_volume(cargo_name)
+    with pytest.raises(ValueError, match="Cargo mount is not a directory"):
+        await driver.delete_volume(f"/daemon-only/cargos/{cargo_name}")
+
+    assert list(real_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_rejects_symlinked_cargo_directory(driver, tmp_path, monkeypatch):
+    local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    cargo_name = "bay-cargo-ws-123456789abc"
+    (local_root / cargo_name).symlink_to(unrelated, target_is_directory=True)
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(local_root), host_root_path="/daemon-only/cargos")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        await driver.delete_volume(f"/daemon-only/cargos/{cargo_name}")
+    assert unrelated.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_delete_failure_is_reported(driver, tmp_path, monkeypatch):
+    local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
+    cargo_name = "bay-cargo-ws-123456789abc"
+    (local_root / cargo_name).mkdir()
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(local_root), host_root_path="/daemon-only/cargos")
+        ),
+    )
+    monkeypatch.setattr(
+        docker_module.shutil,
+        "rmtree",
+        Mock(side_effect=OSError("permission denied")),
+    )
+
+    with pytest.raises(OSError, match="permission denied"):
+        await driver.delete_volume(f"/daemon-only/cargos/{cargo_name}")
+    assert (local_root / cargo_name).is_dir()
