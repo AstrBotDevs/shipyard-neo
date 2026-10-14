@@ -233,7 +233,7 @@ async def test_bind_reference_remains_bind_after_named_volume_resolution(
             cargo=SimpleNamespace(root_path=str(local_root), host_root_path=host_root)
         ),
     )
-    driver._resolved_host_root = None
+    driver._resolved_host_root = docker_module._UNSET
     cargo_name = "bay-cargo-ws-123456789abc"
     cargo_path = local_root / cargo_name
     cargo_path.mkdir()
