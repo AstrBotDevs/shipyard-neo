@@ -7,6 +7,7 @@ monitoring) as ``container kill`` / ``die ... exitCode=137``.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -22,8 +23,8 @@ class FakeContainer:
     def __init__(
         self,
         *,
-        stop_error: DockerError | None = None,
-        delete_error: DockerError | None = None,
+        stop_error: Exception | None = None,
+        delete_error: Exception | None = None,
     ) -> None:
         self.calls: list[str] = []
         self.stop_kwargs: dict | None = None
@@ -92,6 +93,20 @@ async def test_destroy_removes_already_stopped_container(driver):
 async def test_destroy_removes_container_when_stop_fails(driver):
     """A failing graceful stop does not block force removal."""
     container = FakeContainer(stop_error=DockerError(500, "stop failed"))
+    attach_client(driver, container)
+
+    await driver.destroy("bay-session-sess-abc")
+
+    assert container.calls == ["stop", "delete"]
+    assert container.delete_kwargs == {"force": True}
+    assert logged(driver, "docker.destroy.stop_failed")
+
+
+@pytest.mark.parametrize("error", [RuntimeError("connection reset"), asyncio.TimeoutError()])
+@pytest.mark.asyncio
+async def test_destroy_removes_container_when_stop_raises_transport_error(driver, error):
+    """Transport or timeout errors from stop must not block force removal."""
+    container = FakeContainer(stop_error=error)
     attach_client(driver, container)
 
     await driver.destroy("bay-session-sess-abc")

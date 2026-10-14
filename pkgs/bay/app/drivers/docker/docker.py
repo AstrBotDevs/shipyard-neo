@@ -451,14 +451,16 @@ class DockerDriver(Driver):
                 # timeout=HTTP budget, kept above t so removal never aborts
                 # the stop request it is waiting on.
                 await container.stop(t=10, timeout=30)
-            except DockerError as stop_error:
-                # 304: already stopped, nothing to do before removal.
-                # 404: already gone; the removal call below handles it.
-                if stop_error.status not in (304, 404):
+            except Exception as stop_error:
+                # Graceful stop is best-effort: a transport or timeout error
+                # must not skip the forced removal below. 304 (already
+                # stopped) and 404 (already gone) are expected and silent.
+                status = getattr(stop_error, "status", None)
+                if status not in (304, 404):
                     self._log.warning(
                         "docker.destroy.stop_failed",
                         container_id=container_id,
-                        status=stop_error.status,
+                        status=status,
                         error=str(stop_error),
                     )
             await container.delete(force=True)
