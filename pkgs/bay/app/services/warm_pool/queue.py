@@ -13,7 +13,8 @@ Key design decisions (from §2.5 / §2.5.1):
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import structlog
@@ -30,6 +31,7 @@ class WarmupTask:
 
     sandbox_id: str
     owner: str
+    enqueued_at: float = field(default_factory=time.monotonic)
 
 
 @dataclass
@@ -71,9 +73,9 @@ class WarmupQueue:
         self._queue: asyncio.Queue[WarmupTask] = asyncio.Queue(
             maxsize=config.warmup_queue_max_size,
         )
-        # Dedup set: sandbox_ids currently in the queue
+        # Includes both queued and actively warming sandboxes.
         self._pending: set[str] = set()
-        self._pending_lock = asyncio.Lock()
+        self._warmup_seconds: dict[str, float] = {}
 
         self._workers: list[asyncio.Task] = []
         self._running = False
@@ -93,6 +95,14 @@ class WarmupQueue:
     def is_running(self) -> bool:
         """Whether the queue workers are running."""
         return self._running
+
+    def is_pending(self, sandbox_id: str) -> bool:
+        """Whether this process already owns a queued or running warmup."""
+        return sandbox_id in self._pending
+
+    def estimated_warmup_seconds(self, profile_id: str) -> float:
+        """Recent warmup cost, including time spent waiting for a worker."""
+        return self._warmup_seconds.get(profile_id, 0.0)
 
     async def start(self) -> None:
         """Start worker tasks."""
@@ -120,7 +130,7 @@ class WarmupQueue:
     async def stop(self) -> None:
         """Stop worker tasks gracefully.
 
-        Drains remaining items then cancels workers.
+        Lets active work finish, cancels slow workers, then clears queued work.
         """
         if not self._running:
             return
@@ -146,6 +156,13 @@ class WarmupQueue:
                     pass
 
         self._workers.clear()
+        # A stopped queue can be started again. Do not retain sentinels or dedup
+        # entries for work that no worker can consume; persisted pool rows are
+        # recovered by the scheduler.
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+        self._pending.clear()
         self._log.info(
             "warmup_queue.stopped",
             stats_enqueue=self._stats.enqueue_total,
@@ -153,11 +170,13 @@ class WarmupQueue:
             stats_consumed=self._stats.consumed_total,
         )
 
-    def enqueue(self, *, sandbox_id: str, owner: str) -> bool:
+    def enqueue(self, *, sandbox_id: str, owner: str, background: bool = False) -> bool:
         """Enqueue a warmup task (non-blocking).
 
         Returns True if enqueued, False if dropped (dedup or full).
         This method is synchronous to avoid blocking the create endpoint.
+        Background pool maintenance never evicts an existing task, even when
+        foreground creates use the drop_oldest policy.
         """
         # Fast-path dedup check (best-effort, not locked)
         if sandbox_id in self._pending:
@@ -191,10 +210,11 @@ class WarmupQueue:
                     sandbox_id=sandbox_id,
                 )
 
-            if self._config.warmup_queue_drop_policy == "drop_oldest":
+            if not background and self._config.warmup_queue_drop_policy == "drop_oldest":
                 # Remove oldest item from queue and enqueue this one
                 try:
                     evicted = self._queue.get_nowait()
+                    self._queue.task_done()
                     if evicted is not None:
                         self._pending.discard(evicted.sandbox_id)
                     self._queue.put_nowait(task)
@@ -226,6 +246,7 @@ class WarmupQueue:
 
                 # Sentinel check for shutdown
                 if task is None:
+                    self._queue.task_done()
                     break
 
                 self._stats.active_workers += 1
@@ -256,7 +277,7 @@ class WarmupQueue:
         from app.api.dependencies import get_driver
         from app.db.session import get_async_session
         from app.managers.sandbox import SandboxManager
-        from app.models.sandbox import Sandbox
+        from app.models.sandbox import Sandbox, WarmState
 
         self._stats.consumed_total += 1
 
@@ -280,9 +301,13 @@ class WarmupQueue:
                 )
                 sandbox = result.scalars().first()
 
-                if sandbox is None:
+                if (
+                    sandbox is None
+                    or sandbox.owner != task.owner
+                    or sandbox.warm_state == WarmState.RETIRING.value
+                ):
                     self._log.debug(
-                        "warmup_worker.skip.deleted",
+                        "warmup_worker.skip.stale",
                         sandbox_id=task.sandbox_id,
                         owner=task.owner,
                     )
@@ -331,6 +356,11 @@ class WarmupQueue:
                         sandbox.id,
                         warm_rotate_ttl=warm_rotate_ttl,
                     )
+                    # React quickly to slower starts, decay gradually after
+                    # faster ones. Only configured pool profiles add entries.
+                    elapsed = max(0.0, time.monotonic() - task.enqueued_at)
+                    previous = self._warmup_seconds.get(sandbox.profile_id, elapsed)
+                    self._warmup_seconds[sandbox.profile_id] = max(elapsed, previous * 0.8)
                     self._log.info(
                         "warmup_worker.mark_available.complete",
                         worker_id=worker_id,

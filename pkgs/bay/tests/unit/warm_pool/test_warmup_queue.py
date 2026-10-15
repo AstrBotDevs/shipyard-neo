@@ -14,7 +14,7 @@ from app.managers.sandbox import SandboxManager
 from app.models.cargo import Cargo
 from app.models.sandbox import Sandbox
 from app.models.session import Session, SessionStatus
-from app.services.warm_pool.queue import WarmupQueue
+from app.services.warm_pool.queue import WarmupQueue, WarmupTask
 from tests.fakes import FakeDriver
 
 
@@ -244,7 +244,7 @@ class TestWarmupQueueRecovery:
         monkeypatch.setattr(SandboxManager, "mark_warm_available", AsyncMock(return_value=None))
 
         await queue._process_task(
-            task=type("Task", (), {"sandbox_id": sandbox.id, "owner": sandbox.owner})(),
+            task=WarmupTask(sandbox_id=sandbox.id, owner=sandbox.owner),
             worker_id=0,
         )
 

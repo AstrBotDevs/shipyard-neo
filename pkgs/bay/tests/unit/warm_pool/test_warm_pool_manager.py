@@ -280,7 +280,10 @@ class _FakeWarmupQueue:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str]] = []
 
-    def enqueue(self, *, sandbox_id: str, owner: str) -> bool:
+    def is_pending(self, sandbox_id: str) -> bool:
+        return False
+
+    def enqueue(self, *, sandbox_id: str, owner: str, background: bool = False) -> bool:
         self.enqueued.append((sandbox_id, owner))
         return True
 

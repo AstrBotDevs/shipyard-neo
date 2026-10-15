@@ -57,7 +57,7 @@ async def _requeue_existing_warm_pool_sandboxes(warmup_queue: WarmupQueue) -> No
             skipped_retiring += 1
             continue
 
-        if warmup_queue.enqueue(sandbox_id=sandbox.id, owner=sandbox.owner):
+        if warmup_queue.enqueue(sandbox_id=sandbox.id, owner=sandbox.owner, background=True):
             requeued += 1
         else:
             skipped_enqueue += 1

@@ -1,19 +1,22 @@
-"""WarmPoolScheduler - Periodic pool maintenance.
+"""WarmPoolScheduler - Event-driven refill with periodic reconciliation.
 
 Responsibilities (from §4.5):
 1. Periodically scan profiles with warm_pool_size > 0
 2. Count available warm instances
-3. Replenish pool to target size
-4. Rotate instances past warm_rotate_at
+3. Recover dropped/failed warmup work and replenish after claims
+4. Prepare bounded replacements before rotating instances past warm_rotate_at
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlmodel import func, select
+from sqlalchemy import update
+from sqlmodel import select
 
 from app.drivers.base import ContainerStatus
 from app.models.sandbox import Sandbox, WarmState
@@ -31,7 +34,8 @@ class WarmPoolScheduler:
     """Scheduler for warm pool maintenance.
 
     Periodically checks each profile's warm pool and:
-    - Replenishes to target size when count < warm_pool_size
+    - Wakes on claims and replenishes to target size
+    - Prepares at most one replacement per profile ahead of rotation
     - Rotates instances when warm_rotate_at <= now
     """
 
@@ -47,10 +51,17 @@ class WarmPoolScheduler:
         self._running = False
         self._task: asyncio.Task | None = None
         self._run_lock = asyncio.Lock()
+        self._wake = asyncio.Event()
+        self._retry_after: dict[str, float] = {}
+        self._create_retry_after: dict[str, float] = {}
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    def request_maintenance(self) -> None:
+        """Coalesce refill requests without blocking the caller."""
+        self._wake.set()
 
     async def start(self) -> None:
         """Start background maintenance loop."""
@@ -164,10 +175,12 @@ class WarmPoolScheduler:
             return 0
 
         driver = get_driver()
-        stale_ids: list[str] = []
+        stale_rows: list[tuple[Sandbox, Session | None]] = []
         requeued = 0
 
         for sandbox, session in available_rows:
+            if self._queue.is_pending(sandbox.id):
+                continue
             runtime_ok = False
 
             if session is not None:
@@ -184,59 +197,54 @@ class WarmPoolScheduler:
                 )
                 continue
 
-            stale_ids.append(sandbox.id)
-            enqueue_result = self._queue.enqueue(sandbox_id=sandbox.id, owner=sandbox.owner)
-            if enqueue_result:
-                requeued += 1
+            stale_rows.append((sandbox, session))
 
-            self._log.warning(
-                "warm_pool.runtime_state_drift_detected",
-                sandbox_id=sandbox.id,
-                profile_id=profile_id,
-                session_id=sandbox.current_session_id,
-                current_session_id=sandbox.current_session_id,
-                warm_state=sandbox.warm_state,
-                requeued=enqueue_result,
-            )
-
-        if not stale_ids:
+        if not stale_rows:
             return 0
 
+        recovered: list[tuple[str, str]] = []
         async with get_async_session() as db:
-            result = await db.execute(select(Sandbox).where(Sandbox.id.in_(stale_ids)))
-            stale_sandboxes = result.scalars().all()
-
-            session_ids = [
-                sandbox.current_session_id
-                for sandbox in stale_sandboxes
-                if sandbox.current_session_id
-            ]
-            sessions_by_id: dict[str, Session] = {}
-            if session_ids:
-                session_result = await db.execute(
-                    select(Session).where(Session.id.in_(session_ids))
+            for sandbox, session in stale_rows:
+                # The probe ran outside the transaction. A user may have
+                # claimed this instance, or a worker may have replaced its
+                # session in the meantime. Only reset the version we probed.
+                result = await db.execute(
+                    update(Sandbox)
+                    .where(
+                        Sandbox.id == sandbox.id,
+                        Sandbox.deleted_at.is_(None),
+                        Sandbox.is_warm_pool.is_(True),
+                        Sandbox.warm_state == WarmState.AVAILABLE.value,
+                        Sandbox.current_session_id == sandbox.current_session_id,
+                        Sandbox.warm_ready_at == sandbox.warm_ready_at,
+                    )
+                    .values(warm_state=None, warm_ready_at=None, warm_rotate_at=None)
                 )
-                sessions_by_id = {session.id: session for session in session_result.scalars().all()}
-
-            for sandbox in stale_sandboxes:
-                sandbox.warm_state = None
-                sandbox.warm_ready_at = None
-                sandbox.warm_rotate_at = None
-
-                if sandbox.current_session_id:
-                    session = sessions_by_id.get(sandbox.current_session_id)
-                    if session is not None:
-                        session.observed_state = SessionStatus.STOPPED
-                        session.endpoint = None
-                        session.last_observed_at = utcnow()
-
+                if not result.rowcount:
+                    continue
+                if session is not None:
+                    await db.execute(
+                        update(Session)
+                        .where(Session.id == session.id)
+                        .values(
+                            observed_state=SessionStatus.STOPPED,
+                            endpoint=None,
+                            last_observed_at=utcnow(),
+                        )
+                    )
+                recovered.append((sandbox.id, sandbox.owner))
             await db.commit()
+
+        # Publish work only after the pending state has been committed.
+        for sandbox_id, owner in recovered:
+            if self._queue.enqueue(sandbox_id=sandbox_id, owner=owner, background=True):
+                requeued += 1
 
         self._log.info(
             "warm_pool.runtime_reconcile.complete",
             profile_id=profile_id,
             checked=len(available_rows),
-            stale=len(stale_ids),
+            stale=len(recovered),
             requeued=requeued,
         )
         return requeued
@@ -310,116 +318,122 @@ class WarmPoolScheduler:
         )
         return healthy
 
-    async def _maintain_profile(self, profile) -> int:
-        """Maintain warm pool for a single profile.
+    def _rotation_lead_seconds(self, profile) -> float:
+        """Prepare early using observed queue/start cost, without changing TTL.
 
-        Returns number of new warm sandboxes created.
+        Keep at least half of a warm instance's lifetime outside the preparation
+        window, so short TTLs cannot cause continuous replacement creation.
+        """
+        interval = max(1.0, self._config.interval_seconds)
+        estimate = self._queue.estimated_warmup_seconds(profile.id)
+        return min(max(0.0, profile.warm_rotate_ttl / 2), interval + estimate * 1.5)
+
+    async def _maintain_profile(self, profile) -> int:
+        """Recover lost work, retire expired instances and replenish the pool.
+
+        At most one extra instance per profile may be prepared for rotation.
+        Claimed sandboxes are excluded by every maintenance write.
         """
         from app.db.session import get_async_session
 
-        now = utcnow()
-        created_count = 0
-
         await self._reconcile_profile_runtime_state(profile.id)
+        now = utcnow()
 
         async with get_async_session() as db:
-            # Count available warm sandboxes for this profile
-            count_result = await db.execute(
-                select(func.count(Sandbox.id)).where(
+            # Conditional UPDATE competes safely with the claim UPDATE. An
+            # expired instance still leaves the pool at its original deadline,
+            # even if its replacement failed to start.
+            await db.execute(
+                update(Sandbox)
+                .where(
                     Sandbox.deleted_at.is_(None),
                     Sandbox.is_warm_pool.is_(True),
                     Sandbox.warm_state == WarmState.AVAILABLE.value,
                     Sandbox.profile_id == profile.id,
+                    Sandbox.warm_rotate_at <= now,
                 )
+                .values(warm_state=WarmState.RETIRING.value)
             )
-            available_count = count_result.scalar() or 0
-
-            # Count in-flight warm sandboxes (created/enqueued but not available yet)
-            pending_result = await db.execute(
-                select(func.count(Sandbox.id)).where(
-                    Sandbox.deleted_at.is_(None),
-                    Sandbox.is_warm_pool.is_(True),
-                    Sandbox.warm_state.is_(None),
-                    Sandbox.profile_id == profile.id,
-                )
-            )
-            pending_count = pending_result.scalar() or 0
-
-            self._log.debug(
-                "warm_pool.profile_check",
-                profile_id=profile.id,
-                available=available_count,
-                pending=pending_count,
-                target=profile.warm_pool_size,
-            )
-
-            # Handle rotation: mark instances past warm_rotate_at as retiring
-            rotate_result = await db.execute(
+            await db.commit()
+            result = await db.execute(
                 select(Sandbox).where(
                     Sandbox.deleted_at.is_(None),
                     Sandbox.is_warm_pool.is_(True),
-                    Sandbox.warm_state == WarmState.AVAILABLE.value,
+                    Sandbox.warm_state == WarmState.RETIRING.value,
                     Sandbox.profile_id == profile.id,
-                    Sandbox.warm_rotate_at.is_not(None),
-                    Sandbox.warm_rotate_at <= now,
                 )
             )
-            expired_warm = rotate_result.scalars().all()
+            retiring = [(sandbox.id, sandbox.owner) for sandbox in result.scalars().all()]
 
-            for sandbox in expired_warm:
-                sandbox.warm_state = WarmState.RETIRING.value
-                self._log.info(
-                    "warm_pool.rotating",
-                    sandbox_id=sandbox.id,
-                    profile_id=profile.id,
-                    warm_rotate_at=sandbox.warm_rotate_at.isoformat()
-                    if sandbox.warm_rotate_at
-                    else None,
+        # Retry previously failed retirements as well, even when no refill is
+        # necessary. Delete before creating to limit temporary resource use.
+        for sandbox_id, owner in retiring:
+            await self._retire_warm_sandbox(sandbox_id, owner)
+
+        async with get_async_session() as db:
+            result = await db.execute(
+                select(Sandbox)
+                .where(
+                    Sandbox.deleted_at.is_(None),
+                    Sandbox.is_warm_pool.is_(True),
+                    Sandbox.profile_id == profile.id,
                 )
-
-            if expired_warm:
-                await db.commit()
-                # Recalculate available count after rotation
-                available_count -= len(expired_warm)
-
-            # Replenish: create warm sandboxes to fill the gap
-            supply_count = max(available_count, 0) + max(pending_count, 0)
-            deficit = profile.warm_pool_size - supply_count
-            if deficit <= 0:
-                return 0
-
-            self._log.info(
-                "warm_pool.replenishing",
-                profile_id=profile.id,
-                deficit=deficit,
-                available=available_count,
-                pending=pending_count,
+                .order_by(Sandbox.created_at.asc(), Sandbox.id.asc())
             )
+            pool = result.scalars().all()
 
-        # Create warm sandboxes outside the counting transaction
+        available = [s for s in pool if s.warm_state == WarmState.AVAILABLE.value]
+        pending = [s for s in pool if s.warm_state is None]
+        clock_now = time.monotonic()
+        if clock_now >= self._retry_after.get(profile.id, 0.0):
+            # DB pending rows are durable recovery records, not proof that the
+            # in-memory queue still owns the work. Retry dropped/failed work at
+            # most once per scan interval, even during a burst of claim events.
+            self._retry_after[profile.id] = clock_now + max(1.0, self._config.interval_seconds)
+            for sandbox in pending:
+                if not self._queue.is_pending(sandbox.id):
+                    accepted = self._queue.enqueue(
+                        sandbox_id=sandbox.id, owner=sandbox.owner, background=True
+                    )
+                    if not accepted:
+                        break
+
+        prepare_before = now + timedelta(seconds=self._rotation_lead_seconds(profile))
+        rotating_soon = any(
+            s.warm_rotate_at is not None and s.warm_rotate_at <= prepare_before for s in available
+        )
+        target = profile.warm_pool_size + int(rotating_soon)
+        # Include failed deletions in the resource cap. They must not cause
+        # unbounded growth on subsequent cycles.
+        capacity = max(0, profile.warm_pool_size + 1 - len(pool))
+        deficit = min(capacity, max(0, target - len(available) - len(pending)))
+        if not deficit or clock_now < self._create_retry_after.get(profile.id, 0.0):
+            return 0
+
+        self._log.info(
+            "warm_pool.replenishing",
+            profile_id=profile.id,
+            deficit=deficit,
+            available=len(available),
+            pending=len(pending),
+            preparing_rotation=rotating_soon,
+        )
+        created_count = 0
         for _ in range(deficit):
             try:
                 sandbox_id = await self._create_warm_sandbox(profile)
                 if sandbox_id:
                     created_count += 1
             except Exception as exc:
+                self._create_retry_after[profile.id] = time.monotonic() + max(
+                    1.0, self._config.interval_seconds
+                )
                 self._log.warning(
                     "warm_pool.create_failed",
                     profile_id=profile.id,
                     error=str(exc),
                 )
-
-        # Retire old instances (schedule deletion)
-        for sandbox in expired_warm:
-            try:
-                await self._retire_warm_sandbox(sandbox.id, sandbox.owner)
-            except Exception as exc:
-                self._log.warning(
-                    "warm_pool.retire_failed",
-                    sandbox_id=sandbox.id,
-                    error=str(exc),
-                )
-
+                break
         return created_count
 
     async def _create_warm_sandbox(self, profile) -> str | None:
@@ -448,6 +462,7 @@ class WarmPoolScheduler:
             self._queue.enqueue(
                 sandbox_id=sandbox.id,
                 owner=sandbox.owner,
+                background=True,
             )
 
             return sandbox.id
@@ -462,6 +477,8 @@ class WarmPoolScheduler:
             manager = SandboxManager(driver=get_driver(), db_session=db)
             try:
                 sandbox = await manager.get(sandbox_id, owner)
+                if not sandbox.is_warm_pool or sandbox.warm_state != WarmState.RETIRING.value:
+                    return
                 await manager.delete(
                     sandbox,
                     delete_source="warm_pool.scheduler.retire",
@@ -492,10 +509,17 @@ class WarmPoolScheduler:
             )
             if should_sleep:
                 try:
-                    await asyncio.sleep(self._config.interval_seconds)
+                    await asyncio.wait_for(
+                        self._wake.wait(), timeout=max(1.0, self._config.interval_seconds)
+                    )
+                except TimeoutError:
+                    pass
                 except asyncio.CancelledError:
                     break
 
+            # Clear before running so a claim during maintenance schedules one
+            # more pass instead of being lost. Many notifications coalesce.
+            self._wake.clear()
             first_iteration = False
 
             try:

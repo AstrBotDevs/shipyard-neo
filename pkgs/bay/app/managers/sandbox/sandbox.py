@@ -753,6 +753,13 @@ class SandboxManager:
                     attempt=attempt + 1,
                     cargo_id=claimed.cargo_id,
                 )
+                # Wake the existing scheduler without adding work to the
+                # request's critical path. Repeated claims coalesce there.
+                from app.services.warm_pool.lifecycle import get_warm_pool_scheduler
+
+                scheduler = get_warm_pool_scheduler()
+                if scheduler is not None:
+                    scheduler.request_maintenance()
                 return claimed
 
             # Claim failed (concurrent claim), retry
@@ -843,32 +850,31 @@ class SandboxManager:
             sandbox_id: Sandbox ID to mark
             warm_rotate_ttl: Seconds until rotation
         """
+        from sqlalchemy import update
+
         now = utcnow()
+        rotate_at = now + timedelta(seconds=warm_rotate_ttl)
         result = await self._db.execute(
-            select(Sandbox).where(
+            update(Sandbox)
+            .where(
                 Sandbox.id == sandbox_id,
+                Sandbox.deleted_at.is_(None),
                 Sandbox.is_warm_pool.is_(True),
+                Sandbox.warm_state.is_(None),
+            )
+            .values(
+                warm_state=WarmState.AVAILABLE.value,
+                warm_ready_at=now,
+                warm_rotate_at=rotate_at,
             )
         )
-        sandbox = result.scalars().first()
-
-        if sandbox is None:
-            self._log.warning(
-                "sandbox.mark_warm_available.not_found",
-                sandbox_id=sandbox_id,
-            )
-            return
-
-        sandbox.warm_state = WarmState.AVAILABLE.value
-        sandbox.warm_ready_at = now
-        sandbox.warm_rotate_at = now + timedelta(seconds=warm_rotate_ttl)
         await self._db.commit()
-
-        self._log.info(
-            "sandbox.warm_available",
-            sandbox_id=sandbox_id,
-            warm_rotate_at=sandbox.warm_rotate_at.isoformat(),
-        )
+        if result.rowcount:
+            self._log.info(
+                "sandbox.warm_available",
+                sandbox_id=sandbox_id,
+                warm_rotate_at=rotate_at.isoformat(),
+            )
 
     async def mark_warm_retiring(self, sandbox_id: str) -> None:
         """Mark a warm sandbox as retiring (prevent it from being claimed).
@@ -876,22 +882,21 @@ class SandboxManager:
         Args:
             sandbox_id: Sandbox ID to mark
         """
+        from sqlalchemy import update
+
         result = await self._db.execute(
-            select(Sandbox).where(
+            update(Sandbox)
+            .where(
                 Sandbox.id == sandbox_id,
+                Sandbox.deleted_at.is_(None),
                 Sandbox.is_warm_pool.is_(True),
                 Sandbox.warm_state == WarmState.AVAILABLE.value,
             )
+            .values(warm_state=WarmState.RETIRING.value)
         )
-        sandbox = result.scalars().first()
-
-        if sandbox is None:
-            return
-
-        sandbox.warm_state = WarmState.RETIRING.value
         await self._db.commit()
-
-        self._log.info(
-            "sandbox.warm_retiring",
-            sandbox_id=sandbox_id,
-        )
+        if result.rowcount:
+            self._log.info(
+                "sandbox.warm_retiring",
+                sandbox_id=sandbox_id,
+            )
