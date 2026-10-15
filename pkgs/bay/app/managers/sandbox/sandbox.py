@@ -29,7 +29,7 @@ from app.managers.cargo import CargoManager
 from app.managers.session import SessionManager
 from app.models.cargo import Cargo
 from app.models.sandbox import Sandbox, SandboxStatus, WarmState
-from app.models.session import Session
+from app.models.session import Session, SessionStatus
 from app.utils.datetime import utcnow
 
 if TYPE_CHECKING:
@@ -330,6 +330,44 @@ class SandboxManager:
             session = None
             if locked_sandbox.current_session_id:
                 session = await self._session_mgr.get(locked_sandbox.current_session_id)
+
+            if (
+                session is not None
+                and session.observed_state == SessionStatus.STARTING
+                and locked_sandbox.deleted_at is None
+                and locked_sandbox.is_warm_pool
+                and locked_sandbox.warm_state is None
+            ):
+                # This lock serializes warmup for an unclaimed instance. If a
+                # previous attempt left STARTING after cancellation/restart,
+                # nobody still owns that start here. Reuse persisted runtime
+                # IDs and let normal start/readiness checks finish the work.
+                if session.container_id is None:
+                    # A process can disappear after Docker/K8s created resources
+                    # but before their IDs were committed (especially multi-
+                    # container starts). Remove only this warm session's partial
+                    # resources before retrying, and retain STARTING if cleanup
+                    # fails so the next attempt retries cleanup first.
+                    labels = {
+                        "bay.session_id": session.id,
+                        "bay.cargo_id": cargo.id,
+                        "bay.managed": "true",
+                    }
+                    instances = await self._driver.list_runtime_instances(labels=labels)
+                    for instance in instances:
+                        if all(instance.labels.get(key) == value for key, value in labels.items()):
+                            await self._driver.destroy_runtime_instance(instance.id)
+                    if len(profile.get_containers()) > 1:
+                        await self._driver.remove_session_network(session.id)
+                session.observed_state = SessionStatus.STOPPED
+                session.endpoint = None
+                session.last_observed_at = utcnow()
+                await self._db.commit()
+                self._log.info(
+                    "sandbox.warm_resume_interrupted_start",
+                    sandbox_id=sandbox_id,
+                    session_id=session.id,
+                )
 
             # Create session if needed
             if session is None:

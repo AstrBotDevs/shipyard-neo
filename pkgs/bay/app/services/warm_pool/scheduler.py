@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlmodel import select
 
 from app.drivers.base import ContainerStatus
@@ -53,7 +53,9 @@ class WarmPoolScheduler:
         self._run_lock = asyncio.Lock()
         self._wake = asyncio.Event()
         self._retry_after: dict[str, float] = {}
+        self._retry_cursor: dict[str, str] = {}
         self._create_retry_after: dict[str, float] = {}
+        self._profile_offset = 0
 
     @property
     def is_running(self) -> bool:
@@ -119,6 +121,11 @@ class WarmPoolScheduler:
         if not warm_profiles:
             return results
 
+        # A small queue must not always give the first profile its only slot.
+        offset = self._profile_offset % len(warm_profiles)
+        warm_profiles = warm_profiles[offset:] + warm_profiles[:offset]
+        self._profile_offset = (offset + 1) % len(warm_profiles)
+
         self._log.info(
             "warm_pool.cycle.start",
             profiles=len(warm_profiles),
@@ -167,6 +174,7 @@ class WarmPoolScheduler:
                     Sandbox.is_warm_pool.is_(True),
                     Sandbox.warm_state == WarmState.AVAILABLE.value,
                     Sandbox.profile_id == profile_id,
+                    or_(Sandbox.warm_rotate_at.is_(None), Sandbox.warm_rotate_at > utcnow()),
                 )
             )
             available_rows = result.all()
@@ -217,6 +225,9 @@ class WarmPoolScheduler:
                         Sandbox.warm_state == WarmState.AVAILABLE.value,
                         Sandbox.current_session_id == sandbox.current_session_id,
                         Sandbox.warm_ready_at == sandbox.warm_ready_at,
+                        # A slow runtime probe may cross the rotation deadline.
+                        # Leave expired instances for retirement, not recovery.
+                        or_(Sandbox.warm_rotate_at.is_(None), Sandbox.warm_rotate_at > utcnow()),
                     )
                     .values(warm_state=None, warm_ready_at=None, warm_rotate_at=None)
                 )
@@ -390,6 +401,13 @@ class WarmPoolScheduler:
             # in-memory queue still owns the work. Retry dropped/failed work at
             # most once per scan interval, even during a burst of claim events.
             self._retry_after[profile.id] = clock_now + max(1.0, self._config.interval_seconds)
+            cursor = self._retry_cursor.get(profile.id)
+            for index, sandbox in enumerate(pending):
+                if sandbox.id == cursor:
+                    # Resume after the last admitted task. Otherwise a failed
+                    # oldest row can monopolize every retry in a small queue.
+                    pending = pending[index + 1 :] + pending[: index + 1]
+                    break
             for sandbox in pending:
                 if not self._queue.is_pending(sandbox.id):
                     accepted = self._queue.enqueue(
@@ -397,6 +415,7 @@ class WarmPoolScheduler:
                     )
                     if not accepted:
                         break
+                    self._retry_cursor[profile.id] = sandbox.id
 
         prepare_before = now + timedelta(seconds=self._rotation_lead_seconds(profile))
         rotating_soon = any(
