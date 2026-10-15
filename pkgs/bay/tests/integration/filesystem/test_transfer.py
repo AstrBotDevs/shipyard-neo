@@ -7,25 +7,29 @@ Parallel-safe: Yes - each test creates/deletes its own sandbox.
 
 from __future__ import annotations
 
+from email.message import Message
+
 import httpx
+import pytest
 
 from ..conftest import AUTH_HEADERS, BAY_BASE_URL, create_sandbox, e2e_skipif_marks
 
 pytestmark = e2e_skipif_marks
 
 
-async def test_upload_and_download_text():
+@pytest.mark.parametrize("filename", ["upload.txt", "测试.txt"])
+async def test_upload_and_download_text(filename):
     """Upload text file and download it back."""
     async with httpx.AsyncClient(base_url=BAY_BASE_URL, headers=AUTH_HEADERS) as client:
         async with create_sandbox(client) as sandbox:
             sid = sandbox["id"]
             content = b"Hello, World!\nLine 2"
-            path = "upload.txt"
+            path = filename
 
             # Upload
             u = await client.post(
                 f"/v1/sandboxes/{sid}/filesystem/upload",
-                files={"file": ("upload.txt", content, "text/plain")},
+                files={"file": (filename, content, "text/plain")},
                 data={"path": path},
                 timeout=120.0,
             )
@@ -41,6 +45,11 @@ async def test_upload_and_download_text():
             )
             assert d.status_code == 200
             assert d.content == content
+
+            headers = Message()
+            headers["Content-Disposition"] = d.headers["content-disposition"]
+            assert headers.get_content_disposition() == "attachment"
+            assert headers.get_filename() == filename
 
 
 async def test_upload_and_download_binary():
