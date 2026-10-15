@@ -431,12 +431,38 @@ class DockerDriver(Driver):
                 raise
 
     async def destroy(self, container_id: str) -> None:
-        """Destroy (remove) a container."""
+        """Destroy (remove) a container.
+
+        The container is asked to stop gracefully before removal. Without this,
+        a normal lifecycle operation such as a warm pool rotation shows up in
+        Docker events (and in external monitoring) as ``container kill`` /
+        ``die ... exitCode=137``, i.e. an abnormal SIGKILL termination.
+
+        A failing graceful stop never blocks removal: the container is still
+        removed with ``force=True`` afterwards.
+        """
         client = await self._get_client()
         self._log.info("docker.destroy", container_id=container_id)
 
         try:
             container = client.containers.container(container_id)
+            try:
+                # t=grace period for the container to exit on SIGTERM;
+                # timeout=HTTP budget, kept above t so removal never aborts
+                # the stop request it is waiting on.
+                await container.stop(t=10, timeout=30)
+            except Exception as stop_error:
+                # Graceful stop is best-effort: a transport or timeout error
+                # must not skip the forced removal below. 304 (already
+                # stopped) and 404 (already gone) are expected and silent.
+                status = getattr(stop_error, "status", None)
+                if status not in (304, 404):
+                    self._log.warning(
+                        "docker.destroy.stop_failed",
+                        container_id=container_id,
+                        status=status,
+                        error=str(stop_error),
+                    )
             await container.delete(force=True)
         except DockerError as e:
             if e.status == 404:
