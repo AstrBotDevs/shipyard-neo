@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
@@ -825,9 +826,15 @@ async def download_file(
 
     content = await capability_router.download_file(sandbox=sandbox, path=path)
     filename = Path(path).name
+    # Use RFC 5987 encoding for filenames that cannot be safely included verbatim.
+    quoted_filename = quote(filename, safe="")
+    if quoted_filename != filename:
+        content_disposition = f"attachment; filename*=utf-8''{quoted_filename}"
+    else:
+        content_disposition = f'attachment; filename="{filename}"'
 
     return Response(
         content=content,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )
