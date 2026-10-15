@@ -180,6 +180,26 @@ ax.set_title('Font cache warmup')
 plt.close(fig)
 
 print('Matplotlib font cache warmed up successfully')
+
+# Compile the fixed kernel startup dependencies at their final runtime paths.
+# Python still validates these caches against the source files before using
+# them. Keep workspace files and kernel execution out of the image build.
+import compileall
+import py_compile
+import sysconfig
+from pathlib import Path
+
+site_packages = Path(sysconfig.get_path('purelib'))
+for package in ('jupyter_client', 'jupyter_core', 'ipykernel', 'IPython', 'traitlets', 'zmq'):
+    source_dir = site_packages / package
+    if not source_dir.is_dir() or not compileall.compile_dir(
+        source_dir,
+        quiet=1,
+        force=True,
+        invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
+    ):
+        raise RuntimeError(f'Failed to precompile kernel dependency: {package}')
+print('Kernel startup bytecode cache prepared successfully')
 EOF
 
 # 暴露端口

@@ -389,6 +389,37 @@ class SessionManager:
 
         return session
 
+    @staticmethod
+    async def _probe_runtime_ready(
+        client: httpx.AsyncClient | None,
+        endpoint: str | None,
+        runtime_type: str,
+    ) -> bool:
+        """Probe readiness without changing session state or caching the result."""
+        if endpoint is None:
+            return False
+
+        url = f"{endpoint.rstrip('/')}/health"
+        try:
+            if client is not None:
+                response = await client.get(url, timeout=2.0)
+            else:
+                async with httpx.AsyncClient(trust_env=False) as temp_client:
+                    response = await temp_client.get(url, timeout=2.0)
+        except (httpx.RequestError, httpx.TimeoutException):
+            return False
+
+        if response.status_code != 200:
+            return False
+        if runtime_type == "browser":
+            try:
+                # Preserve compatibility with older runtimes that omit this field
+                # or do not return a JSON object from /health.
+                return bool(response.json().get("browser_ready", True))
+            except Exception:
+                return True
+        return True
+
     async def _wait_for_multi_ready(
         self,
         container_infos: list[MultiContainerInfo],
@@ -402,7 +433,7 @@ class SessionManager:
     ) -> None:
         """Wait for all containers in a multi-container session to be ready.
 
-        Polls each container's /health endpoint until all respond successfully.
+        Polls pending containers concurrently until all respond successfully.
         For browser containers (Gull), also checks that browser_ready=true in
         the health response to ensure Chromium has been pre-warmed.
         """
@@ -419,41 +450,23 @@ class SessionManager:
 
         while pending:
             attempt += 1
-            newly_ready: list[str] = []
-
-            for name, ci in pending.items():
-                if ci.endpoint is None:
-                    continue
-
-                url = f"{ci.endpoint.rstrip('/')}/health"
-                try:
-                    if client is not None:
-                        response = await client.get(url, timeout=2.0)
-                    else:
-                        async with httpx.AsyncClient(trust_env=False) as temp_client:
-                            response = await temp_client.get(url, timeout=2.0)
-
-                    if response.status_code == 200:
-                        # For browser containers, also require browser_ready=true.
-                        # This ensures Chromium is pre-warmed before marking ready.
-                        # Old Gull images without browser_ready field are treated
-                        # as ready (backward compat: field absence = ready).
-                        if ci.runtime_type == "browser":
-                            try:
-                                payload = response.json()
-                                browser_ready = payload.get("browser_ready", True)
-                                if browser_ready:
-                                    newly_ready.append(name)
-                            except Exception:
-                                # Can't parse JSON; treat as ready
-                                newly_ready.append(name)
-                        else:
-                            newly_ready.append(name)
-                except (httpx.RequestError, httpx.TimeoutException):
-                    pass
-
-            for name in newly_ready:
-                del pending[name]
+            # Finish every probe before returning or propagating an error, so
+            # session rollback cannot race with leftover readiness tasks.
+            names = list(pending)
+            results = await asyncio.gather(
+                *(
+                    self._probe_runtime_ready(client, ci.endpoint, ci.runtime_type)
+                    for ci in pending.values()
+                ),
+                return_exceptions=True,
+            )
+            # Keep error selection and pending-container ordering deterministic.
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            for name, ready in zip(names, results):
+                if ready:
+                    del pending[name]
 
             if not pending:
                 elapsed = asyncio.get_event_loop().time() - start_time
@@ -521,8 +534,6 @@ class SessionManager:
         Raises:
             SessionNotReadyError: If runtime doesn't become ready in time
         """
-        url = f"{endpoint.rstrip('/')}/health"
-
         start_time = asyncio.get_event_loop().time()
         interval = initial_interval
         attempt = 0
@@ -536,57 +547,15 @@ class SessionManager:
             client = None
         while True:
             attempt += 1
-            try:
-                if client is not None:
-                    # Use shared client
-                    response = await client.get(url, timeout=2.0)
-                else:
-                    # Fallback: create temporary client
-                    async with httpx.AsyncClient(trust_env=False) as temp_client:
-                        response = await temp_client.get(url, timeout=2.0)
-
-                if response.status_code == 200:
-                    # For browser containers, also require browser_ready=true.
-                    # This ensures Chromium is pre-warmed before marking ready.
-                    # Old Gull images without browser_ready field are treated
-                    # as ready (backward compat: field absence = ready).
-                    if runtime_type == "browser":
-                        try:
-                            payload = response.json()
-                            browser_ready = payload.get("browser_ready", True)
-                            if not browser_ready:
-                                # /health returned 200 but browser not yet warm
-                                pass  # fall through to retry
-                            else:
-                                elapsed = asyncio.get_event_loop().time() - start_time
-                                self._log.info(
-                                    "session.runtime_ready",
-                                    session_id=session_id,
-                                    attempts=attempt,
-                                    elapsed_ms=int(elapsed * 1000),
-                                )
-                                return
-                        except Exception:
-                            # Can't parse JSON; treat as ready (backward compat)
-                            elapsed = asyncio.get_event_loop().time() - start_time
-                            self._log.info(
-                                "session.runtime_ready",
-                                session_id=session_id,
-                                attempts=attempt,
-                                elapsed_ms=int(elapsed * 1000),
-                            )
-                            return
-                    else:
-                        elapsed = asyncio.get_event_loop().time() - start_time
-                        self._log.info(
-                            "session.runtime_ready",
-                            session_id=session_id,
-                            attempts=attempt,
-                            elapsed_ms=int(elapsed * 1000),
-                        )
-                        return
-            except (httpx.RequestError, httpx.TimeoutException):
-                pass
+            if await self._probe_runtime_ready(client, endpoint, runtime_type):
+                elapsed = asyncio.get_event_loop().time() - start_time
+                self._log.info(
+                    "session.runtime_ready",
+                    session_id=session_id,
+                    attempts=attempt,
+                    elapsed_ms=int(elapsed * 1000),
+                )
+                return
 
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed >= max_wait_seconds:
