@@ -186,26 +186,35 @@ class WarmPoolScheduler:
         stale_rows: list[tuple[Sandbox, Session | None]] = []
         requeued = 0
 
-        for sandbox, session in available_rows:
+        async def probe(row) -> bool:
+            sandbox, session = row
             if self._queue.is_pending(sandbox.id):
-                continue
-            runtime_ok = False
+                return True
+            if session is None:
+                return False
+            return await self._is_session_runtime_healthy(driver, session)
 
-            if session is not None:
-                runtime_ok = await self._is_session_runtime_healthy(driver, session)
-
-            if runtime_ok:
-                self._log.debug(
-                    "warm_pool.runtime_state_healthy",
-                    sandbox_id=sandbox.id,
-                    profile_id=profile_id,
-                    session_id=sandbox.current_session_id,
-                    current_session_id=sandbox.current_session_id,
-                    warm_state=sandbox.warm_state,
-                )
-                continue
-
-            stale_rows.append((sandbox, session))
+        # Probe independent runtimes concurrently, with the same bounded fanout
+        # as warmup workers. Batch tasks are drained before applying any state
+        # changes; cancellation must not leave background probes behind.
+        concurrency = max(1, self._config.warmup_queue_workers)
+        for offset in range(0, len(available_rows), concurrency):
+            batch = available_rows[offset : offset + concurrency]
+            outcomes = await asyncio.gather(*(probe(row) for row in batch), return_exceptions=True)
+            for (sandbox, session), runtime_ok in zip(batch, outcomes, strict=True):
+                if isinstance(runtime_ok, BaseException):
+                    raise runtime_ok
+                if runtime_ok:
+                    self._log.debug(
+                        "warm_pool.runtime_state_healthy",
+                        sandbox_id=sandbox.id,
+                        profile_id=profile_id,
+                        session_id=sandbox.current_session_id,
+                        current_session_id=sandbox.current_session_id,
+                        warm_state=sandbox.warm_state,
+                    )
+                else:
+                    stale_rows.append((sandbox, session))
 
         if not stale_rows:
             return 0

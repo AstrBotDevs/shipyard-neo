@@ -588,6 +588,26 @@ class SandboxManager:
             # Get cargo (re-fetch after rollback)
             cargo = await self._cargo_mgr.get_by_id(cargo_id)
 
+            if (
+                locked_sandbox.is_warm_pool
+                and locked_sandbox.warm_state == WarmState.RETIRING.value
+                and cargo is not None
+                and cargo.managed
+            ):
+                # Retiring pool instances cannot be claimed. Keep their retry
+                # record and resource-budget slot until the volume is gone;
+                # otherwise a failed delete leaks volumes on every rotation.
+                await self._cargo_mgr.delete(cargo.id, owner, force=True)
+                self._log.info(
+                    "sandbox.delete.cascade_cargo_deleted",
+                    sandbox_id=sandbox_id,
+                    owner=owner,
+                    cargo_id=cargo_id,
+                    delete_source=delete_source,
+                    request_id=request_id,
+                )
+                cargo = None
+
             # Soft delete sandbox
             locked_sandbox.deleted_at = utcnow()
             locked_sandbox.current_session_id = None
@@ -751,7 +771,6 @@ class SandboxManager:
                 )
             )
             update_result = await self._db.execute(stmt)
-            await self._db.commit()
 
             if update_result.rowcount == 1:
                 # Claim succeeded - refetch the sandbox
@@ -781,7 +800,10 @@ class SandboxManager:
                 cargo = cargo_result.scalars().first()
                 if cargo is not None:
                     cargo.owner = owner
-                    await self._db.commit()
+                # Publish the sandbox and its managed workspace together. A
+                # failed/cancelled transfer must not consume a warm instance or
+                # leave ownership split across two transactions.
+                await self._db.commit()
 
                 self._log.info(
                     "sandbox.warm_claim.success",

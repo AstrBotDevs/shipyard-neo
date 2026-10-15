@@ -572,8 +572,10 @@ class DockerDriver(Driver):
         if host_root:
             # Bind-mount mode: name is already a host path, delete directory
             cargo_path = Path(name)
-            if cargo_path.exists():
-                shutil.rmtree(cargo_path, ignore_errors=True)
+            try:
+                shutil.rmtree(cargo_path)
+            except FileNotFoundError:
+                pass
             self._log.info("docker.delete_volume.bind", path=str(cargo_path))
         else:
             # Named-volume mode: name is volume name
@@ -582,7 +584,11 @@ class DockerDriver(Driver):
                 vol = await client.volumes.get(name)
                 await vol.delete()
                 self._log.info("docker.delete_volume.named", name=name)
-            except DockerError:
+            except DockerError as exc:
+                # An absent volume is an idempotent success; busy volumes,
+                # permission failures and daemon errors must remain retryable.
+                if exc.status != 404:
+                    raise
                 self._log.warning("docker.delete_volume.not_found", name=name)
 
     async def volume_exists(self, name: str) -> bool:

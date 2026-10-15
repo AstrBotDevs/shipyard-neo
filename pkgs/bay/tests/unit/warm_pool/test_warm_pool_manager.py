@@ -317,7 +317,9 @@ class TestWarmPoolSchedulerReconcile:
 
         queue = _FakeWarmupQueue()
         scheduler = WarmPoolScheduler(
-            config=SimpleNamespace(interval_seconds=60, run_on_startup=False),
+            config=SimpleNamespace(
+                interval_seconds=60, run_on_startup=False, warmup_queue_workers=1
+            ),
             warmup_queue=queue,
         )
 
@@ -403,7 +405,9 @@ class TestWarmPoolSchedulerReconcile:
 
         queue = _FakeWarmupQueue()
         scheduler = WarmPoolScheduler(
-            config=SimpleNamespace(interval_seconds=60, run_on_startup=False),
+            config=SimpleNamespace(
+                interval_seconds=60, run_on_startup=False, warmup_queue_workers=1
+            ),
             warmup_queue=queue,
         )
 
@@ -468,7 +472,9 @@ class TestWarmPoolSchedulerReconcile:
 
         queue = _FakeWarmupQueue()
         scheduler = WarmPoolScheduler(
-            config=SimpleNamespace(interval_seconds=60, run_on_startup=False),
+            config=SimpleNamespace(
+                interval_seconds=60, run_on_startup=False, warmup_queue_workers=1
+            ),
             warmup_queue=queue,
         )
 
