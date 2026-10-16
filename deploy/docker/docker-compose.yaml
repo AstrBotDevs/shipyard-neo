@@ -52,6 +52,7 @@ services:
     environment:
       - BAY_CONFIG_FILE=/app/config.yaml
       - BAY_DATA_DIR=/app/data
+      - BAY_CONTAINER_NAME=bay
       # To inject a fixed API key instead of auto-generation:
       # - BAY_API_KEY=sk-bay-your-key-here
     networks:
