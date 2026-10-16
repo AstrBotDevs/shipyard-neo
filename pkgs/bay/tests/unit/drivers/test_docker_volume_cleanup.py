@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiodocker.exceptions import DockerError
 
+from app.drivers.docker import docker as docker_module
 from app.drivers.docker.docker import DockerDriver
 
 
@@ -30,21 +31,33 @@ async def test_named_volume_cleanup_only_ignores_not_found(monkeypatch, stage, s
 
 async def test_bind_volume_cleanup_permission_failure_is_retryable(tmp_path, monkeypatch):
     driver = DockerDriver()
-    workspace = tmp_path / "cargo"
+    local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
+    host_root = "/daemon-only/cargos"
+    cargo_name = "bay-cargo-ws-0123456789ab"
+    # The daemon sees the bind path; the directory to remove lives under cargo.root_path.
+    workspace = local_root / cargo_name
     workspace.mkdir()
     (workspace / "file.txt").write_text("still present")
-    monkeypatch.setattr(driver, "_resolve_host_root", AsyncMock(return_value=str(tmp_path)))
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(local_root), host_root_path=host_root)
+        ),
+    )
+    monkeypatch.setattr(driver, "_resolve_host_root", AsyncMock(return_value=host_root))
+    bind_ref = f"{host_root}/{cargo_name}"
 
-    def cannot_remove(path, **kwargs):
-        if not kwargs.get("ignore_errors", False):
-            raise PermissionError("workspace is not writable")
+    def cannot_remove(path):
+        raise PermissionError("workspace is not writable")
 
     with monkeypatch.context() as patch:
         patch.setattr("app.drivers.docker.docker.shutil.rmtree", cannot_remove)
         with pytest.raises(PermissionError):
-            await driver.delete_volume(str(workspace))
+            await driver.delete_volume(bind_ref)
     assert (workspace / "file.txt").read_text() == "still present"
-    await driver.delete_volume(str(workspace))
+    await driver.delete_volume(bind_ref)
     assert not workspace.exists()
     # Retrying after the directory is already gone remains a successful no-op.
-    await driver.delete_volume(str(workspace))
+    await driver.delete_volume(bind_ref)
