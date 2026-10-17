@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
+_TERMINAL_RUNTIME_STATES = frozenset({"dead", "exited", "failed", "succeeded"})
+
 
 class OrphanCargoGC(GCTask):
     """GC task for cleaning up orphan managed cargos.
@@ -88,18 +90,42 @@ class OrphanCargoGC(GCTask):
         return result
 
     async def _has_runtime_references(self, cargo_id: str) -> bool:
-        """Check whether any runtime instance still references the cargo.
+        """Check whether any active runtime instance still references the cargo.
 
-        Conservative by design: if any runtime instance still carries the cargo label,
-        skip deletion for this GC cycle and let a later cycle retry after runtime cleanup.
+        Stopped containers and completed pods retain labels until they are removed, but no
+        longer use the cargo. Remove those terminal runtime objects, then query again before
+        allowing cargo deletion. Unknown or transitional states remain conservative.
         """
-        instances = await self._driver.list_runtime_instances(
+        labels = {
+            "bay.cargo_id": cargo_id,
+            "bay.managed": "true",
+        }
+        instances = await self._driver.list_runtime_instances(labels=labels)
+        if any(
+            instance.state.lower() not in _TERMINAL_RUNTIME_STATES
+            for instance in instances
+        ):
+            return True
+
+        for instance in instances:
+            self._log.info(
+                "gc.orphan_cargo.remove_terminal_runtime",
+                cargo_id=cargo_id,
+                runtime_id=instance.id,
+                runtime_state=instance.state,
+            )
+            await self._driver.destroy_runtime_instance(instance.id)
+
+        if not instances:
+            return False
+
+        remaining = await self._driver.list_runtime_instances(
             labels={
                 "bay.cargo_id": cargo_id,
                 "bay.managed": "true",
             }
         )
-        return len(instances) > 0
+        return bool(remaining)
 
     async def _find_orphans(self) -> list[str]:
         """Find orphan managed cargo IDs."""
