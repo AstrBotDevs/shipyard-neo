@@ -79,6 +79,13 @@ class K8sConfig(BaseModel):
     # Pod startup timeout in seconds
     pod_startup_timeout: int = 60
 
+    # Seconds to wait for a block volume to be detached before the PVC is
+    # deleted. Deleting the PVC while the CSI driver still holds an attachment
+    # makes the external-provisioner reject the delete with VolumeFailedDelete
+    # ("is still attached to node ...") and retry with backoff. 0 disables the
+    # wait (previous behaviour).
+    volume_detach_timeout: int = Field(default=30, ge=0)
+
     # Pod labels prefix (for filtering)
     label_prefix: str = "bay"
 

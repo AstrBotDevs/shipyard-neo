@@ -17,6 +17,7 @@ See: plans/phase-2/k8s-driver-analysis.md
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import structlog
@@ -62,6 +63,18 @@ def _parse_storage_size(size_str: str) -> str:
     return size_str
 
 
+def _attached_nodes(attachment_list: object, pv_name: str) -> list[str]:
+    """Node names of VolumeAttachments that still reference ``pv_name``."""
+    nodes: list[str] = []
+    for attachment in getattr(attachment_list, "items", None) or []:
+        spec = getattr(attachment, "spec", None)
+        source = getattr(spec, "source", None)
+        if getattr(source, "persistent_volume_name", None) != pv_name:
+            continue
+        nodes.append(getattr(spec, "node_name", "") or "")
+    return nodes
+
+
 def _parse_memory(memory_str: str) -> str:
     """Normalize memory string for K8s (e.g., '1g' -> '1Gi', '512m' -> '512Mi').
 
@@ -105,6 +118,9 @@ class K8sDriver(Driver):
         self._image_pull_secrets = k8s_cfg.image_pull_secrets
         self._pod_startup_timeout = k8s_cfg.pod_startup_timeout
         self._label_prefix = k8s_cfg.label_prefix
+        self._volume_detach_timeout = max(
+            0, int(getattr(k8s_cfg, "volume_detach_timeout", 30) or 0)
+        )
 
         # Image pull policy: always | if_not_present | never → K8s values
         self._image_pull_policy = settings.driver.image_pull_policy
@@ -112,6 +128,9 @@ class K8sDriver(Driver):
         self._log = logger.bind(driver="k8s")
         self._api_client: ApiClient | None = None
         self._config_loaded = False
+        # Shared in-flight VolumeAttachment list (see _list_volume_attachments).
+        self._attachment_lock = asyncio.Lock()
+        self._attachment_inflight: asyncio.Task[object] | None = None
 
     def _label(self, key: str) -> str:
         """Build label key with prefix (e.g., 'bay.session_id')."""
@@ -559,11 +578,39 @@ class K8sDriver(Driver):
         return name
 
     async def delete_volume(self, name: str) -> None:
-        """Delete a PersistentVolumeClaim."""
+        """Delete a PersistentVolumeClaim once its volume is detached.
+
+        A Pod object disappearing does not mean its volume is detached: the
+        kubelet still has to unmount it and the attach-detach controller has to
+        remove the VolumeAttachment. Deleting the PVC inside that window makes
+        the CSI external-provisioner reject the deletion of the backing
+        PersistentVolume::
+
+            VolumeFailedDelete: persistentvolume pvc-... is still attached to
+            node k8s-worker-2
+
+        and retry it with exponential backoff — one burst of warnings per
+        sandbox teardown on RWO block storage, and the PV lingers for as long as
+        the detach takes. Waiting for the attachment to disappear first keeps
+        the delete a single successful operation.
+        """
         api_client = await self._get_api_client()
         v1 = client.CoreV1Api(api_client)
 
         self._log.info("k8s.delete_volume", name=name)
+
+        try:
+            pvc = await v1.read_namespaced_persistent_volume_claim(
+                name=name,
+                namespace=self._namespace,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                self._log.warning("k8s.delete_volume.not_found", name=name)
+                return
+            raise
+
+        await self._wait_volume_detached(api_client, pvc)
 
         try:
             await v1.delete_namespaced_persistent_volume_claim(
@@ -575,6 +622,110 @@ class K8sDriver(Driver):
                 self._log.warning("k8s.delete_volume.not_found", name=name)
             else:
                 raise
+
+    async def _wait_volume_detached(
+        self,
+        api_client: ApiClient,
+        pvc: client.V1PersistentVolumeClaim,
+    ) -> None:
+        """Poll VolumeAttachments until none references the PVC's volume.
+
+        Returns immediately for unbound PVCs and when the wait is disabled
+        (``volume_detach_timeout: 0``). The whole wait is best effort: a service
+        account without cluster-wide VolumeAttachment access, an API error, or a
+        volume that never detaches all fall back to deleting the PVC exactly as
+        before, because a failed detach check must never block cargo cleanup.
+        The wait is bounded by ``volume_detach_timeout`` of wall-clock time —
+        request latency included — and every request is capped by the time left.
+        """
+        pv_name = pvc.spec.volume_name if pvc.spec else None
+        if not pv_name or self._volume_detach_timeout <= 0:
+            return
+
+        deadline = time.monotonic() + self._volume_detach_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._log.warning(
+                    "k8s.delete_volume.detach_timeout",
+                    name=pvc.metadata.name,
+                    pv=pv_name,
+                    timeout=self._volume_detach_timeout,
+                )
+                return
+
+            try:
+                attached = await self._attached_nodes_for_pv(api_client, pv_name, timeout=remaining)
+            except ApiException as e:
+                if e.status in (401, 403):
+                    self._log.debug(
+                        "k8s.delete_volume.detach_check_forbidden",
+                        name=pvc.metadata.name,
+                        pv=pv_name,
+                        status=e.status,
+                    )
+                else:
+                    self._log.warning(
+                        "k8s.delete_volume.detach_check_failed",
+                        name=pvc.metadata.name,
+                        pv=pv_name,
+                        error=str(e),
+                    )
+                return
+            except Exception as e:  # noqa: BLE001 - best effort, never block cleanup
+                self._log.warning(
+                    "k8s.delete_volume.detach_check_failed",
+                    name=pvc.metadata.name,
+                    pv=pv_name,
+                    error=repr(e),
+                )
+                return
+
+            if not attached:
+                self._log.debug(
+                    "k8s.delete_volume.volume_detached",
+                    name=pvc.metadata.name,
+                    pv=pv_name,
+                )
+                return
+
+            await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+
+    async def _attached_nodes_for_pv(
+        self,
+        api_client: ApiClient,
+        pv_name: str,
+        *,
+        timeout: float,
+    ) -> list[str]:
+        """Node names still attaching ``pv_name``, bounded by ``timeout``."""
+        attachment_list = await asyncio.wait_for(
+            self._list_volume_attachments(api_client), timeout=timeout
+        )
+        return _attached_nodes(attachment_list, pv_name)
+
+    async def _list_volume_attachments(self, api_client: ApiClient) -> object:
+        """List VolumeAttachments, coalescing concurrent callers.
+
+        VolumeAttachment is cluster-scoped and the API offers no field selector
+        for the PersistentVolume, so every waiter scans the whole list.
+        Teardowns that poll at the same moment share one in-flight request
+        instead of each issuing its own every second.
+        """
+        async with self._attachment_lock:
+            task = self._attachment_inflight
+            if task is None or task.done():
+                task = asyncio.create_task(self._fetch_volume_attachments(api_client))
+                self._attachment_inflight = task
+        try:
+            return await task
+        finally:
+            async with self._attachment_lock:
+                if self._attachment_inflight is task and task.done():
+                    self._attachment_inflight = None
+
+    async def _fetch_volume_attachments(self, api_client: ApiClient) -> object:
+        return await client.StorageV1Api(api_client).list_volume_attachment()
 
     async def volume_exists(self, name: str) -> bool:
         """Check if a PVC exists."""

@@ -34,6 +34,8 @@ data:
         default_storage_size: "1Gi"
         image_pull_secrets: []  # 如使用私有 registry 添加 secret 名称
         pod_startup_timeout: 120
+        # 删除 Cargo PVC 前等待块卷 detach 的秒数（0 = 不等待，旧行为）。
+        volume_detach_timeout: 30
         label_prefix: "bay"
 
     cargo:

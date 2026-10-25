@@ -50,3 +50,37 @@ roleRef:
   kind: Role
   name: bay-role
   apiGroup: rbac.authorization.k8s.io
+---
+# 只读 VolumeAttachments：删除 Cargo PVC 前等待卷真正 detach。
+# 块存储（RWO）的 Pod 消失后，kubelet 卸载 + attach-detach controller 摘除
+# VolumeAttachment 还需要几秒；这段时间内删除 PVC 会让 CSI external-provisioner
+# 拒绝删除 PV（VolumeFailedDelete: still attached to node ...）并指数退避重试。
+# VolumeAttachment 是集群级资源，namespaced Role 无法授予，因此单独建 ClusterRole。
+# 不授予时 Bay 会跳过等待并直接删 PVC（旧行为），不会失败。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bay-volumeattachment-reader
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bay-volumeattachment-reader
+  labels:
+    app.kubernetes.io/name: bay
+    app.kubernetes.io/part-of: shipyard-neo
+subjects:
+  - kind: ServiceAccount
+    name: bay
+    namespace: bay
+roleRef:
+  kind: ClusterRole
+  name: bay-volumeattachment-reader
+  apiGroup: rbac.authorization.k8s.io

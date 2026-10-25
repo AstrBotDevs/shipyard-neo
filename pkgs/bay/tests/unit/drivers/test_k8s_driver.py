@@ -5,6 +5,7 @@ Tests the K8s driver logic with mocked kubernetes-asyncio API.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -394,3 +395,268 @@ class TestK8sDriverBuildLabels:
             assert labels["bay.runtime_port"] == "8123"
             assert labels["bay.managed"] == "true"
             assert labels["custom"] == "label"
+
+
+class _FakeClock:
+    """Deterministic clock for the detach-wait deadline."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class TestK8sDriverVolumeDetachTimeoutConfig:
+    """volume_detach_timeout must stay nonnegative."""
+
+    def test_rejects_negative(self):
+        from pydantic import ValidationError
+
+        from app.config import K8sConfig
+
+        with pytest.raises(ValidationError):
+            K8sConfig(volume_detach_timeout=-1)
+
+    def test_accepts_zero(self):
+        from app.config import K8sConfig
+
+        assert K8sConfig(volume_detach_timeout=0).volume_detach_timeout == 0
+
+
+class TestK8sDriverDeleteVolume:
+    """delete_volume() must not race the CSI detach."""
+
+    @pytest.fixture
+    def driver(self):
+        with patch("app.drivers.k8s.k8s.get_settings") as mock_settings:
+            mock_k8s_cfg = MagicMock()
+            mock_k8s_cfg.namespace = "bay"
+            mock_k8s_cfg.kubeconfig = None
+            mock_k8s_cfg.storage_class = None
+            mock_k8s_cfg.default_storage_size = "1Gi"
+            mock_k8s_cfg.image_pull_secrets = []
+            mock_k8s_cfg.pod_startup_timeout = 60
+            mock_k8s_cfg.volume_detach_timeout = 5
+            mock_k8s_cfg.label_prefix = "bay"
+
+            mock_driver_cfg = MagicMock()
+            mock_driver_cfg.k8s = mock_k8s_cfg
+
+            mock_settings.return_value.driver = mock_driver_cfg
+
+            return K8sDriver()
+
+    @staticmethod
+    def _pvc(name: str = "bay-cargo-ws-abc", volume_name: str | None = "pvc-123"):
+        pvc = MagicMock()
+        pvc.metadata.name = name
+        pvc.spec.volume_name = volume_name
+        return pvc
+
+    @staticmethod
+    def _attachment_list(*pvs: str):
+        attachment_list = MagicMock()
+        attachment_list.items = []
+        for pv_name in pvs:
+            attachment = MagicMock()
+            attachment.spec.source.persistent_volume_name = pv_name
+            attachment.spec.node_name = "k8s-worker-2"
+            attachment_list.items.append(attachment)
+        return attachment_list
+
+    @staticmethod
+    def _fake_sleep(clock: _FakeClock):
+        async def sleep(seconds: float) -> None:
+            clock.now += seconds
+
+        return sleep
+
+    @pytest.mark.asyncio
+    async def test_waits_for_detach_before_deleting(self, driver):
+        """Should poll until no VolumeAttachment references the PV."""
+        clock = _FakeClock()
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+
+        mock_storage_v1 = AsyncMock()
+        mock_storage_v1.list_volume_attachment.side_effect = [
+            self._attachment_list("pvc-123"),
+            self._attachment_list("pvc-123"),
+            self._attachment_list(),
+        ]
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    with patch("app.drivers.k8s.k8s.time.monotonic", new=clock.monotonic):
+                        with patch(
+                            "app.drivers.k8s.k8s.asyncio.sleep",
+                            new=self._fake_sleep(clock),
+                        ):
+                            await driver.delete_volume("bay-cargo-ws-abc")
+
+        assert mock_storage_v1.list_volume_attachment.await_count == 3
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once_with(
+            name="bay-cargo-ws-abc", namespace="bay"
+        )
+
+    @pytest.mark.asyncio
+    async def test_skips_wait_for_unbound_pvc(self, driver):
+        """Should not list attachments for a PVC that has no volume yet."""
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc(volume_name=None)
+
+        mock_storage_v1 = AsyncMock()
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+
+        mock_storage_v1.list_volume_attachment.assert_not_awaited()
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_wait_when_disabled(self, driver):
+        """volume_detach_timeout=0 restores the previous behaviour."""
+        driver._volume_detach_timeout = 0
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+        mock_storage_v1 = AsyncMock()
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+
+        mock_storage_v1.list_volume_attachment.assert_not_awaited()
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_deadline_counts_request_latency(self, driver):
+        """The wait is bounded by wall-clock time, not by attempt count."""
+        clock = _FakeClock()
+        driver._volume_detach_timeout = 2
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+
+        async def slow_list():
+            clock.now += 0.6  # request latency eats into the budget
+            return self._attachment_list("pvc-123")
+
+        mock_storage_v1 = AsyncMock()
+        mock_storage_v1.list_volume_attachment.side_effect = slow_list
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    with patch("app.drivers.k8s.k8s.time.monotonic", new=clock.monotonic):
+                        with patch(
+                            "app.drivers.k8s.k8s.asyncio.sleep",
+                            new=self._fake_sleep(clock),
+                        ):
+                            await driver.delete_volume("bay-cargo-ws-abc")
+
+        # 0.6s latency + 1s sleep leaves 0.4s, the second request overshoots it.
+        assert mock_storage_v1.list_volume_attachment.await_count == 2
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_slow_list_cannot_stall_teardown(self, driver):
+        """A list request that hangs is capped by the remaining budget."""
+        driver._volume_detach_timeout = 1
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+
+        async def hanging_list():
+            await asyncio.sleep(30)
+
+        mock_storage_v1 = AsyncMock()
+        mock_storage_v1.list_volume_attachment.side_effect = hanging_list
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+        elapsed = loop.time() - started
+
+        assert elapsed < 5
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_teardowns_share_one_list_request(self, driver):
+        """Concurrent waiters must not each scan the cluster."""
+        mock_storage_v1 = AsyncMock()
+
+        async def slow_list():
+            await asyncio.sleep(0.05)
+            return self._attachment_list()
+
+        mock_storage_v1.list_volume_attachment.side_effect = slow_list
+
+        with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+            results = await asyncio.gather(
+                driver._list_volume_attachments(MagicMock()),
+                driver._list_volume_attachments(MagicMock()),
+                driver._list_volume_attachments(MagicMock()),
+            )
+
+        assert len(results) == 3
+        assert mock_storage_v1.list_volume_attachment.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_forbidden_attachment_list_still_deletes(self, driver):
+        """A namespaced Role cannot list VolumeAttachments; keep working."""
+        from kubernetes_asyncio.client import ApiException
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+        mock_storage_v1 = AsyncMock()
+        mock_storage_v1.list_volume_attachment.side_effect = ApiException(status=403)
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_other_api_error_still_deletes(self, driver):
+        """A transient API error must not leave the cargo behind."""
+        from kubernetes_asyncio.client import ApiException
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = self._pvc()
+        mock_storage_v1 = AsyncMock()
+        mock_storage_v1.list_volume_attachment.side_effect = ApiException(status=500)
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_pvc_skips_wait_and_delete(self, driver):
+        """A PVC that is already gone needs no detach check."""
+        from kubernetes_asyncio.client import ApiException
+
+        mock_v1 = AsyncMock()
+        mock_v1.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
+        mock_storage_v1 = AsyncMock()
+
+        with patch.object(driver, "_get_api_client", new=AsyncMock(return_value=MagicMock())):
+            with patch("app.drivers.k8s.k8s.client.CoreV1Api", return_value=mock_v1):
+                with patch("app.drivers.k8s.k8s.client.StorageV1Api", return_value=mock_storage_v1):
+                    await driver.delete_volume("bay-cargo-ws-abc")
+
+        mock_storage_v1.list_volume_attachment.assert_not_awaited()
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_not_awaited()
