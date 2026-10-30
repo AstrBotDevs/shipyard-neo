@@ -324,3 +324,166 @@ async def test_delete_failure_is_reported(driver, tmp_path, monkeypatch):
     with pytest.raises(OSError, match="permission denied"):
         await driver.delete_volume(f"/daemon-only/cargos/{cargo_name}")
     assert (local_root / cargo_name).is_dir()
+
+
+@pytest.mark.asyncio
+async def test_parent_bind_mount_resolves_relative_cargo_subdirectory(driver, monkeypatch):
+    """A bind mount of a parent directory still yields the cargo host path."""
+    original_open = open
+
+    def open_mountinfo(path, *args, **kwargs):
+        if path == "/proc/self/mountinfo":
+            return io.StringIO(
+                "31 1 8:1 / / rw - ext4 /dev/sda1 rw\n"
+                "32 31 8:2 /data /data rw - ext4 /dev/sdb1 rw\n"
+            )
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", open_mountinfo)
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path="/data/cargos", host_root_path=None)
+        ),
+    )
+    inspect_mounts(
+        driver,
+        [{"Type": "bind", "Destination": "/data", "Source": "/host/data"}],
+    )
+
+    assert await driver._resolve_host_root() == "/host/data/cargos"
+
+
+@pytest.mark.asyncio
+async def test_exact_mount_wins_over_parent_mount(driver, monkeypatch):
+    original_open = open
+
+    def open_mountinfo(path, *args, **kwargs):
+        if path == "/proc/self/mountinfo":
+            return io.StringIO(
+                "31 1 8:1 / / rw - ext4 /dev/sda1 rw\n"
+                "32 31 8:2 /data /data rw - ext4 /dev/sdb1 rw\n"
+                "33 32 8:3 /cargos /data/cargos rw - ext4 /dev/sdc1 rw\n"
+            )
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", open_mountinfo)
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path="/data/cargos", host_root_path=None)
+        ),
+    )
+    inspect_mounts(
+        driver,
+        [
+            {"Type": "bind", "Destination": "/data", "Source": "/host/data"},
+            {"Type": "bind", "Destination": "/data/cargos", "Source": "/host/cargos"},
+        ],
+    )
+
+    assert await driver._resolve_host_root() == "/host/cargos"
+
+
+@pytest.mark.asyncio
+async def test_mountinfo_escapes_are_decoded_before_comparison(driver, monkeypatch):
+    original_open = open
+
+    def open_mountinfo(path, *args, **kwargs):
+        if path == "/proc/self/mountinfo":
+            return io.StringIO(
+                "31 1 0:40 /cargos /var/lib/bay/cargo\\040root rw - tmpfs tmpfs rw\n"
+            )
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", open_mountinfo)
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path="/var/lib/bay/cargo root", host_root_path=None)
+        ),
+    )
+    inspect_mounts(
+        driver,
+        [
+            {
+                "Type": "bind",
+                "Destination": "/var/lib/bay/cargo root",
+                "Source": "/host/cargo root",
+            }
+        ],
+    )
+
+    assert await driver._resolve_host_root() == "/host/cargo root"
+
+
+@pytest.mark.asyncio
+async def test_root_path_is_not_treated_as_a_cargo_mount(driver, monkeypatch):
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(cargo=SimpleNamespace(root_path="/", host_root_path=None)),
+    )
+    driver._get_client = AsyncMock()
+
+    assert await driver._resolve_host_root() is None
+    driver._get_client.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_volume_accepts_legacy_host_reference(driver, tmp_path, monkeypatch):
+    """A reference recorded before the bind source changed still deletes the cargo."""
+    local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
+    cargo_name = "bay-cargo-ws-123456789abc"
+    (local_root / cargo_name).mkdir()
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(local_root), host_root_path="/daemon-only/cargos")
+        ),
+    )
+    legacy_ref = f"/old/host/bay-cargos/{cargo_name}"
+
+    assert await driver.volume_exists(legacy_ref)
+    await driver.delete_volume(legacy_ref)
+
+    assert not (local_root / cargo_name).exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_volume_treats_missing_directory_as_success(driver, tmp_path, monkeypatch):
+    local_root = tmp_path / "bay-mount"
+    local_root.mkdir()
+    cargo_name = "bay-cargo-ws-123456789abc"
+    (local_root / cargo_name).mkdir()
+    monkeypatch.setattr(
+        docker_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            cargo=SimpleNamespace(root_path=str(local_root), host_root_path="/daemon-only/cargos")
+        ),
+    )
+    monkeypatch.setattr(
+        docker_module.shutil,
+        "rmtree",
+        Mock(side_effect=FileNotFoundError(cargo_name)),
+    )
+
+    await driver.delete_volume(f"/daemon-only/cargos/{cargo_name}")
+
+
+@pytest.mark.asyncio
+async def test_legacy_reference_is_rebound_to_the_current_host_root(driver):
+    driver._resolved_host_root = "/new/host/cargos"
+    cargo_name = "bay-cargo-ws-123456789abc"
+
+    assert (
+        await driver._cargo_bind_source(f"/old/host/cargos/{cargo_name}")
+        == f"/new/host/cargos/{cargo_name}"
+    )
+    assert await driver._cargo_bind_source(cargo_name) == cargo_name
