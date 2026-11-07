@@ -4,10 +4,12 @@ Stores hashed API keys for authentication.
 Plaintext keys are never stored — only SHA-256 hashes.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
+
+from app.utils.datetime import utcnow
 
 
 class ApiKey(SQLModel, table=True):
@@ -24,5 +26,5 @@ class ApiKey(SQLModel, table=True):
     key_prefix: str = Field()  # First 12 chars of plaintext (e.g., "sk-bay-abc1")
     owner: str = Field(default="default")
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=utcnow)
     deactivated_at: Optional[datetime] = Field(default=None)

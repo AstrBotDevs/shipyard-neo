@@ -13,6 +13,7 @@ dependencies = [
     "sqlmodel>=0.0.14",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
+    "asyncpg>=0.30.0",
     
     # Docker
     "aiodocker>=0.21.0",
